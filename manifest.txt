@@ -1,37 +1,8 @@
-# DAVION09 ENGINE — manifest.txt
-# Format: relative_path raw_url
-action.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/action.sh
-service.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/service.sh
-post-fs-data.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/post-fs-data.sh
-customize.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/customize.sh
-system.prop https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/system.prop
-module.prop https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/module.prop
-service.d/davion_engine_webui.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/service.d/davion_engine_webui.sh
-script_runner/refresh_rate_locker https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/refresh_rate_locker
-script_runner/rr_guard https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/rr_guard
-script_runner/idle60_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/idle60_daemon
-script_runner/sf_controller https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/sf_controller
-script_runner/thermal_watchdog https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/thermal_watchdog
-script_runner/thermal_toggle https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/thermal_toggle
-script_runner/battery_guard https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/battery_guard
-script_runner/headset_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/headset_daemon
-script_runner/ai_thermal_predict https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/ai_thermal_predict
-script_runner/ai_adaptive_freq https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/ai_adaptive_freq
-script_runner/ai_app_classifier https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/ai_app_classifier
-script_runner/encore_app_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/encore_app_daemon
-script_runner/global https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/global
-script_runner/display_mode https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/display_mode
-script_runner/davion_engine_eem_boot https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/davion_engine_eem_boot
-script_runner/davion_engine_manual https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/davion_engine_manual
-logcat_detection/logcat https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/logcat_detection/logcat
-logcat_detection/dumpsys2 https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/logcat_detection/dumpsys2
-webroot/index.html https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/index.html
-webroot/style.css https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/style.css
-webroot/script.js https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/script.js
-webroot/config.json https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/config.json
-webroot/cgi-bin/exec.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/cgi-bin/exec.sh
-webroot/cgi-bin/icon.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/cgi-bin/icon.sh
-webroot/cgi-bin/test.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/cgi-bin/test.sh
-DAVION_ENGINE/AI_MODE/azenith_cpu_engine https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/DAVION_ENGINE/AI_MODE/azenith_cpu_engine
-DAVION_ENGINE/AI_MODE/cpu_governor_control https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/DAVION_ENGINE/AI_MODE/cpu_governor_control
-DAVION_ENGINE/AI_MODE/de_cpu_engine https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/DAVION_ENGINE/AI_MODE/de_cpu_engine
+# DAVION09 ENGINE manifest
+action.sh https://raw.githubusercontent.com/Jeric2294/Python-Project/main/action.sh
+service.sh https://raw.githubusercontent.com/Jeric2294/Python-Project/main/service.sh
+webroot/index.html https://raw.githubusercontent.com/Jeric2294/Python-Project/main/webroot/index.html
+webroot/style.css https://raw.githubusercontent.com/Jeric2294/Python-Project/main/webroot/style.css
+webroot/script.js https://raw.githubusercontent.com/Jeric2294/Python-Project/main/webroot/script.js
+script_runner/idle60_daemon https://raw.githubusercontent.com/Jeric2294/Python-Project/main/script_runner/idle60_daemon
+script_runner/rr_guard https://raw.githubusercontent.com/Jeric2294/Python-Project/main/script_runner/rr_guard
