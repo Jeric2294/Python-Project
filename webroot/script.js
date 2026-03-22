@@ -2324,8 +2324,8 @@ async function openPopup(pkg, gearElement, isGame = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = isGame ? '' : 'none';
   });
-  // Kill Others + Connection on Launch — show for BOTH apps and games
-  ['popup-ko-block', 'popup-conn-block'].forEach(id => {
+  // Kill Others + Connection on Launch + Cache Clear — show for BOTH apps and games
+  ['popup-ko-block', 'popup-conn-block', 'popup-cache-block'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = '';
   });
@@ -2528,6 +2528,19 @@ async function openPopup(pkg, gearElement, isGame = false) {
       _updatePopupConnUI(_popupConnType);
     };
     _dataBtn.addEventListener('click', _dataBtn._connHandler);
+  }
+
+  // ── Load Cache Clear On Launch state ──
+  const cacheBtn   = document.getElementById('popup-cache-btn');
+  const cacheLabel = document.getElementById('popup-cache-label');
+  const cacheOnDisk = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1';
+  if (cacheBtn) {
+    cacheBtn.setAttribute('aria-pressed', String(cacheOnDisk));
+    cacheBtn.classList.toggle('gaming-toggle-btn--on', cacheOnDisk);
+    if (cacheLabel) cacheLabel.textContent = cacheOnDisk ? 'ON' : 'OFF';
+    if (cacheBtn._cacheHandler) cacheBtn.removeEventListener('click', cacheBtn._cacheHandler);
+    cacheBtn._cacheHandler = () => _openCacheClearPopup(pkg);
+    cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
 
   // Load per-app spare from 60Hz drop state — uses dedicated .spare file, isolated from universal
@@ -10135,22 +10148,41 @@ function _renderCacheList(apps) {
   }
 
   list.innerHTML = apps.map(pkg => {
-    const label = getAppLabel ? getAppLabel(pkg) : pkg;
+    const label = typeof getAppLabel === 'function' ? getAppLabel(pkg) : pkg;
     const checked = _cacheSelected.has(pkg);
+    const safeId = pkg.replace(/\./g,'_');
     return `
-      <div class="conn-bubble" style="padding:8px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;"
-        onclick="_toggleCacheSelect('${pkg}', this)">
-        <div style="width:16px;height:16px;border:0.2px solid var(--bdr);border-radius:4px;flex-shrink:0;
-          background:${checked ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;"
-          id="cache-chk-${pkg.replace(/\./g,'_')}">
-          ${checked ? '<span style="color:#000;font-size:11px;">✓</span>' : ''}
+      <div class="list-item" data-pkg="${pkg}" onclick="_toggleCacheSelect('${pkg}')" style="cursor:pointer;">
+        <div class="item-row">
+          <div class="app-icon-wrap" data-pkg="${pkg}">
+            <img class="app-icon" alt="${label.toUpperCase()}">
+          </div>
+          <div class="item-info">
+            <span class="item-title">${label.toUpperCase()}</span>
+            <span class="item-desc mono">${pkg}</span>
+          </div>
         </div>
-        <div style="min-width:0;flex:1;">
-          <div class="mono" style="font-size:10px;color:var(--fg);letter-spacing:0.04em;">${label.toUpperCase()}</div>
-          <div class="mono" style="font-size:8px;color:var(--dim);">${pkg}</div>
+        <div class="btn-row">
+          <div id="cache-chk-${safeId}"
+            style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
+            background:${checked ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;
+            transition:background 0.15s;">
+            ${checked ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : ''}
+          </div>
         </div>
       </div>`;
   }).join('');
+
+  // Load icons same as other panels
+  list.querySelectorAll('.app-icon-wrap[data-pkg]').forEach(wrap => {
+    const p = wrap.dataset.pkg;
+    const img = wrap.querySelector('.app-icon');
+    if (img && !img.dataset.loaded) {
+      img.dataset.loaded = '1';
+      img.src = `ksu://icon/${p}`;
+      img.onerror = () => { img.src = `apatch://icon/${p}`; };
+    }
+  });
 }
 
 function _toggleCacheSelect(pkg, row) {
@@ -10223,4 +10255,201 @@ async function _clearSelectedCache() {
   _renderCacheList(_cacheApps);
   _updateClearBtn();
   if (btn) btn.disabled = false;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CACHE CLEAR ON LAUNCH — Per-app popup
+   File: RR_DIR/pkg.cacheclear (flag)
+   File: RR_DIR/pkg.cacheclear_list (newline-separated pkgs)
+   ═══════════════════════════════════════════════════════════ */
+
+let _cacheClearPkg    = '';
+let _cacheClearOn     = false;
+let _cacheClearList   = new Set();
+let _cacheClearAllPkgs = [];
+let _cacheClearTab    = 'all';
+let _cacheClearQuery  = '';
+
+async function _openCacheClearPopup(pkg) {
+  _cacheClearPkg = pkg;
+  const overlay = document.getElementById('cache-clear-popup');
+  const pkgEl   = document.getElementById('cache-popup-pkg');
+  if (!overlay) return;
+
+  if (pkgEl) pkgEl.textContent = pkg;
+
+  // Load state from disk
+  const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
+  _cacheClearOn = flagRaw.trim() === '1';
+
+  const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
+  _cacheClearList = new Set(listRaw.trim().split('\n').filter(Boolean));
+
+  // Sync toggle
+  const tog = document.getElementById('cache-popup-toggle');
+  const togLabel = document.getElementById('cache-popup-toggle-label');
+  if (tog) {
+    tog.setAttribute('aria-pressed', String(_cacheClearOn));
+    tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
+    if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
+  }
+
+  // Load app list
+  if (!_cacheClearAllPkgs.length) {
+    const raw = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`);
+    _cacheClearAllPkgs = raw.trim().split('\n').filter(p => p && p !== pkg);
+  }
+
+  _cacheClearTab = 'all';
+  _cacheClearQuery = '';
+  _renderCachePopupList();
+  _updateCachePopupCount();
+
+  // Wire search
+  const searchEl = document.getElementById('cache-popup-search');
+  const clearEl  = document.getElementById('cache-popup-search-clear');
+  if (searchEl) {
+    searchEl.value = '';
+    searchEl.oninput = () => {
+      _cacheClearQuery = searchEl.value;
+      if (clearEl) clearEl.hidden = !_cacheClearQuery;
+      _renderCachePopupList();
+    };
+  }
+  if (clearEl) {
+    clearEl.hidden = true;
+    clearEl.onclick = () => {
+      if (searchEl) searchEl.value = '';
+      _cacheClearQuery = '';
+      clearEl.hidden = true;
+      _renderCachePopupList();
+    };
+  }
+
+  // Wire tabs
+  document.querySelectorAll('[data-cachetab]').forEach(btn => {
+    btn.onclick = () => {
+      _cacheClearTab = btn.dataset.cachetab;
+      document.querySelectorAll('[data-cachetab]').forEach(b => {
+        b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
+        b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
+      });
+      _renderCachePopupList();
+    };
+  });
+
+  // Wire toggle
+  if (tog) {
+    tog.onclick = async () => {
+      _cacheClearOn = !_cacheClearOn;
+      tog.setAttribute('aria-pressed', String(_cacheClearOn));
+      tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
+      if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
+      if (_cacheClearOn) {
+        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
+      } else {
+        await exec(`rm -f ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
+      }
+    };
+  }
+
+  // Wire close + done
+  document.getElementById('cache-popup-close')?.addEventListener('click', _closeCacheClearPopup);
+  document.getElementById('cache-popup-done')?.addEventListener('click', _closeCacheClearPopup);
+
+  overlay.style.display = 'flex';
+}
+
+function _closeCacheClearPopup() {
+  const overlay = document.getElementById('cache-clear-popup');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function _renderCachePopupList() {
+  const list = document.getElementById('cache-popup-list');
+  if (!list) return;
+
+  let pool = _cacheClearTab === 'selected'
+    ? _cacheClearAllPkgs.filter(p => _cacheClearList.has(p))
+    : _cacheClearAllPkgs;
+
+  if (_cacheClearQuery) {
+    const q = _cacheClearQuery.toLowerCase();
+    pool = pool.filter(p => p.toLowerCase().includes(q) ||
+      (typeof getAppLabel === 'function' && getAppLabel(p).toLowerCase().includes(q)));
+  }
+
+  _updateCachePopupCount();
+
+  if (!pool.length) {
+    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">No apps</div>`;
+    return;
+  }
+
+  list.innerHTML = pool.map(pkg => {
+    const label = typeof getAppLabel === 'function' ? getAppLabel(pkg) : pkg;
+    const sel = _cacheClearList.has(pkg);
+    return `
+      <div class="list-item" data-pkg="${pkg}" onclick="_toggleCacheClearApp('${pkg}')">
+        <div class="item-row">
+          <div class="app-icon-wrap" data-pkg="${pkg}">
+            <img class="app-icon" alt="${label.toUpperCase()}">
+          </div>
+          <div class="item-info">
+            <span class="item-title">${label.toUpperCase()}</span>
+            <span class="item-desc mono">${pkg}</span>
+          </div>
+        </div>
+        <div class="btn-row">
+          <div id="cachepop-chk-${pkg.replace(/\./g,'_')}"
+            style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
+            background:${sel ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Load icons
+  list.querySelectorAll('.app-icon-wrap[data-pkg]').forEach(wrap => {
+    const p = wrap.dataset.pkg;
+    const img = wrap.querySelector('.app-icon');
+    if (img && !img.dataset.loaded) {
+      img.dataset.loaded = '1';
+      img.src = `ksu://icon/${p}`;
+      img.onerror = () => { img.src = `apatch://icon/${p}`; };
+    }
+  });
+}
+
+async function _toggleCacheClearApp(pkg) {
+  if (_cacheClearList.has(pkg)) {
+    _cacheClearList.delete(pkg);
+  } else {
+    _cacheClearList.add(pkg);
+  }
+
+  // Save list to disk
+  const listStr = [..._cacheClearList].join('\n');
+  await exec(`mkdir -p ${RR_DIR} && printf '%s' '${listStr}' > ${RR_DIR}/${_cacheClearPkg}.cacheclear_list`);
+
+  // Update checkbox
+  const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');
+  const chk = document.getElementById(safeId);
+  const sel = _cacheClearList.has(pkg);
+  if (chk) {
+    chk.style.background = sel ? 'var(--a)' : 'transparent';
+    chk.innerHTML = sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : '';
+  }
+  _updateCachePopupCount();
+}
+
+function _updateCachePopupCount() {
+  const count = _cacheClearList.size;
+  const selTab = document.getElementById('cache-popup-count-selected');
+  const allTab = document.getElementById('cache-popup-count-all');
+  const main   = document.getElementById('cache-popup-count');
+  if (selTab) selTab.textContent = count;
+  if (allTab) allTab.textContent = _cacheClearAllPkgs.length;
+  if (main)   main.textContent   = `${count} app${count !== 1 ? 's' : ''} selected`;
 }

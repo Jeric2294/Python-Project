@@ -1342,14 +1342,10 @@
     <!-- ── PANEL 12: CLEAR APP CACHE ─────────────────────────── -->
     <section class="nexus-panel" id="clear-cache-section" data-pnum="12">
       <details class="panel-details" id="clear-cache-panel">
-        <summary class="panel-summary">
-          <div class="panel-header">
-            <div class="panel-icon" style="background:rgba(var(--a-rgb),0.12);">🗑</div>
-            <div>
-              <div class="panel-title mono">CLEAR APP CACHE</div>
-              <div class="mono" style="font-size:8px;color:var(--dim);margin-top:2px;">Free up space by clearing app cache</div>
-            </div>
-          </div>
+        <summary class="panel-header panel-summary">
+          <div class="panel-tag panel-icon">🗑</div>
+          <div class="panel-title">CLEAR APP CACHE</div>
+          <div class="panel-line"></div>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
 
@@ -1634,10 +1630,78 @@
         </div>
       </div>
 
+      <!-- Cache Clear On Launch -->
+      <div class="popup-block" id="popup-cache-block">
+        <div class="popup-encore-row">
+          <div class="popup-encore-info">
+            <span class="mono popup-block-label">🗑 CLEAR CACHE ON LAUNCH</span>
+            <span class="popup-encore-sub mono">Auto-clear selected apps cache when this app launches</span>
+          </div>
+          <button id="popup-cache-btn" class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" aria-pressed="false">
+            <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
+            <span class="popup-toggle-label mono" id="popup-cache-label">OFF</span>
+          </button>
+        </div>
+      </div>
+
       </div><!-- /popup-scroll-body -->
     </div>
   </div>
 
+
+
+  <!-- ═══ CACHE CLEAR POPUP ═══ -->
+  <div id="cache-clear-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Cache Clear on Launch" style="display:none;">
+    <div class="app-config-bubble ko-spare-popup-card">
+      <!-- Header -->
+      <div class="app-config-bubble-header">
+        <span style="font-size:16px;">🗑</span>
+        <div style="flex:1;min-width:0;">
+          <div class="mono" style="font-size:10px;color:var(--a);letter-spacing:0.08em;">CLEAR CACHE ON LAUNCH</div>
+          <div class="mono" id="cache-popup-pkg" style="font-size:9px;opacity:0.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+        </div>
+        <button id="cache-popup-close" class="app-config-close" aria-label="Close">✕</button>
+      </div>
+
+      <!-- Toggle -->
+      <div class="popup-block" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin-bottom:6px;">
+        <div>
+          <div class="mono" style="font-size:10px;color:#f87171;letter-spacing:0.05em;">CLEAR CACHE ON LAUNCH</div>
+          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">0 apps selected</div>
+        </div>
+        <button class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" id="cache-popup-toggle" aria-pressed="false">
+          <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
+          <span class="mono popup-toggle-label" id="cache-popup-toggle-label">OFF</span>
+        </button>
+      </div>
+
+      <!-- Search -->
+      <div class="search-wrap" style="margin-bottom:6px;">
+        <span class="search-icon mono">⌕</span>
+        <input id="cache-popup-search" class="app-search-input" type="search"
+          placeholder="Filter apps…" autocomplete="off" spellcheck="false">
+        <button id="cache-popup-search-clear" class="search-clear" aria-label="Clear" hidden>✕</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="app-tab-bar" role="tablist" style="margin-bottom:6px;">
+        <button class="app-tab" id="cache-popup-tab-selected" data-cachetab="selected" role="tab" aria-selected="false">
+          <span class="mono">🗑 SELECTED</span>
+          <span class="app-tab-count mono" id="cache-popup-count-selected">0</span>
+        </button>
+        <button class="app-tab app-tab--active" id="cache-popup-tab-all" data-cachetab="all" role="tab" aria-selected="true">
+          <span class="mono">ALL</span>
+          <span class="app-tab-count mono" id="cache-popup-count-all">—</span>
+        </button>
+      </div>
+
+      <!-- App list -->
+      <div id="cache-popup-list" class="app-list ko-popup-list-flex"></div>
+
+      <!-- Done -->
+      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:10px;">✓ DONE</button>
+    </div>
+  </div>
 
   <!-- ═══ KO SPARE POPUP ═══ -->
   <div id="ko-spare-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Spare from Kill" style="display:none;">
