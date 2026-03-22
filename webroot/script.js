@@ -3888,6 +3888,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initUniversalVolume();
   initUniversalScreenTimeout();
   initHeadsetConfig();
+  initCoolMode();
   initCpuVoltOptimizer();
   initPyroxThermal();
   initBrightnessSlider();
@@ -9393,6 +9394,67 @@ function initFeaturesModal() {
 }
 
 
+
+/* ═══════════════════════════════════════════════════════════
+   § COOL MODE — GPU Power + EEM Extended + Schedutil
+   ═══════════════════════════════════════════════════════════ */
+
+const COOL_MODE_CFG    = `${CFG_DIR}/cool_mode_state`;
+const COOL_MODE_SCRIPT = `${MODDIR}/script_runner/cool_mode`;
+
+let coolModeEnabled = false;
+
+function renderCoolModeState() {
+  const btn   = document.getElementById('btn-cool-mode');
+  const label = document.getElementById('cool-mode-label');
+  btn?.setAttribute('aria-pressed', String(coolModeEnabled));
+  btn?.classList.toggle('gaming-toggle-btn--on', coolModeEnabled);
+  if (label) label.textContent = coolModeEnabled ? 'ON' : 'OFF';
+}
+
+async function applyCoolMode(enable) {
+  setStatus(enable ? '❄️ Cool Mode: applying…' : '❄️ Cool Mode: reverting…', 'var(--a)');
+
+  const action = enable ? 'enable' : 'disable';
+  await exec(`chmod 755 "${COOL_MODE_SCRIPT}" 2>/dev/null && sh "${COOL_MODE_SCRIPT}" ${action}`, 10000);
+
+  coolModeEnabled = enable;
+  await exec(`mkdir -p ${CFG_DIR} && echo '${enable ? 'enabled' : 'disabled'}' > ${COOL_MODE_CFG}`);
+
+  if (enable) {
+    if (cpuVoltEnabled) {
+      showToast('Cool Mode ON · GPU + Schedutil tuned (EEM CPU skipped — CPU Volt active)', 'COOL MODE', 'info', '❄️');
+    } else {
+      showToast('Cool Mode ON · GPU + EEM + Schedutil tuned', 'COOL MODE', 'info', '❄️');
+    }
+    setStatus('❄️ Cool Mode ACTIVE — less heat, same performance', 'var(--a)');
+  } else {
+    showToast('Cool Mode OFF · defaults restored', 'COOL MODE', 'info', '❄️');
+    setStatus('Cool Mode disabled', '');
+  }
+
+  renderCoolModeState();
+  autoSave();
+}
+
+function initCoolMode() {
+  document.getElementById('btn-cool-mode')?.addEventListener('click', () => {
+    applyCoolMode(!coolModeEnabled);
+  });
+
+  // Restore saved state on load
+  waitForBridge(8000).then(() =>
+    exec(`cat ${COOL_MODE_CFG} 2>/dev/null`).then(raw => {
+      if (raw.trim() === 'enabled') {
+        coolModeEnabled = true;
+        renderCoolModeState();
+        // Re-apply on load since GED/schedutil nodes reset on reboot
+        applyCoolMode(true);
+      }
+    })
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
    § CPU VOLTS OPTIMIZER — MTK EEM offset tuning
    Reduces voltage on all CPU clusters via /proc/eem nodes.
@@ -10290,11 +10352,15 @@ document.addEventListener('DOMContentLoaded', () => {
    CLEAR APP CACHE — Panel 12
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheApps = [];
+let _cacheApps = [];        // currently displayed pool (user or system)
+let _cacheUserApps = [];    // user-installed packages
+let _cacheSystemApps = [];  // system packages
 let _cacheSelected = new Set();
 let _cacheLoaded = false;
+let _cachePanelTab = 'user'; // 'user' | 'system'
 
-// Load panel when opened
+
+// Load panel when opened + wire tab clicks
 document.addEventListener('DOMContentLoaded', () => {
   const panel = document.getElementById('clear-cache-panel');
   if (panel) {
@@ -10302,6 +10368,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (panel.open && !_cacheLoaded) _loadCacheApps();
     });
   }
+  document.addEventListener('click', e => {
+    const tab = e.target.closest('[data-cachetab2]');
+    if (tab) _switchCachePanelTab(tab.dataset.cachetab2);
+  });
 });
 
 async function _loadCacheApps() {
@@ -10310,14 +10380,43 @@ async function _loadCacheApps() {
   list.innerHTML = '<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">Loading apps…</div>';
 
   try {
-    // Get all user-installed apps
-    const raw = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`);
-    _cacheApps = raw.trim().split('\n').filter(Boolean);
+    const [rawUser, rawSystem] = await Promise.all([
+      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`),
+      exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`),
+    ]);
+    _cacheUserApps   = rawUser.trim().split('\n').filter(Boolean);
+    _cacheSystemApps = rawSystem.trim().split('\n').filter(Boolean);
     _cacheLoaded = true;
+
+    // Update tab counts
+    const uc = document.getElementById('cache-panel-count-user');
+    const sc = document.getElementById('cache-panel-count-system');
+    if (uc) uc.textContent = _cacheUserApps.length;
+    if (sc) sc.textContent = _cacheSystemApps.length;
+
+    _cachePanelTab = 'user';
+    _cacheApps = _cacheUserApps;
     _renderCacheList(_cacheApps);
   } catch(e) {
     list.innerHTML = '<div class="mono" style="font-size:10px;color:#f87171;text-align:center;padding:16px;">Failed to load apps</div>';
   }
+}
+
+function _switchCachePanelTab(tab) {
+  _cachePanelTab = tab;
+  _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
+  document.querySelectorAll('[data-cachetab2]').forEach(b => {
+    const active = b.dataset.cachetab2 === tab;
+    b.classList.toggle('app-tab--active', active);
+    b.setAttribute('aria-selected', String(active));
+  });
+  const searchEl = document.getElementById('cache-search-input');
+  if (searchEl && searchEl.value) {
+    _filterCacheApps(searchEl.value);
+  } else {
+    _renderCacheList(_cacheApps);
+  }
+  _updateClearBtn();
 }
 
 function _renderCacheList(apps) {
@@ -10446,12 +10545,13 @@ async function _clearSelectedCache() {
    File: RR_DIR/pkg.cacheclear_list (newline-separated pkgs)
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheClearPkg    = '';
-let _cacheClearOn     = false;
-let _cacheClearList   = new Set();
-let _cacheClearAllPkgs = [];
-let _cacheClearTab    = 'all';
-let _cacheClearQuery  = '';
+let _cacheClearPkg       = '';
+let _cacheClearOn        = false;
+let _cacheClearList      = new Set();
+let _cacheClearAllPkgs   = [];   // user packages
+let _cacheClearSysPkgs   = [];   // system packages
+let _cacheClearTab       = 'all';
+let _cacheClearQuery     = '';
 
 async function _openCacheClearPopup(pkg) {
   _cacheClearPkg = pkg;
@@ -10477,14 +10577,20 @@ async function _openCacheClearPopup(pkg) {
     if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
   }
 
-  // Load app list
+  // Load app list (user + system)
   if (!_cacheClearAllPkgs.length) {
-    const raw = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`);
-    _cacheClearAllPkgs = raw.trim().split('\n').filter(p => p && p !== pkg);
+    const [rawUser, rawSys] = await Promise.all([
+      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`),
+      exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`),
+    ]);
+    _cacheClearAllPkgs = rawUser.trim().split('\n').filter(p => p && p !== pkg);
+    _cacheClearSysPkgs = rawSys.trim().split('\n').filter(p => p && p !== pkg);
   }
 
   _cacheClearTab = 'all';
   _cacheClearQuery = '';
+  // Reset system pkg cache on reopen (pkg may have changed)
+  _cacheClearSysPkgs = [];
   _renderCachePopupList();
   _updateCachePopupCount();
 
@@ -10509,7 +10615,7 @@ async function _openCacheClearPopup(pkg) {
     };
   }
 
-  // Wire tabs
+  // Wire tabs (selected / all / system)
   document.querySelectorAll('[data-cachetab]').forEach(btn => {
     btn.onclick = () => {
       _cacheClearTab = btn.dataset.cachetab;
@@ -10517,6 +10623,15 @@ async function _openCacheClearPopup(pkg) {
         b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
         b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
       });
+      // Load system pkgs on first switch to system tab
+      if (_cacheClearTab === 'system' && !_cacheClearSysPkgs.length) {
+        exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`).then(raw => {
+          _cacheClearSysPkgs = raw.trim().split('\n').filter(p => p && p !== _cacheClearPkg);
+          _updateCachePopupCount();
+          _renderCachePopupList();
+        });
+        return;
+      }
       _renderCachePopupList();
     };
   });
@@ -10560,8 +10675,10 @@ function _renderCachePopupList() {
   if (!list) return;
 
   let pool = _cacheClearTab === 'selected'
-    ? _cacheClearAllPkgs.filter(p => _cacheClearList.has(p))
-    : _cacheClearAllPkgs;
+    ? [..._cacheClearAllPkgs, ..._cacheClearSysPkgs].filter(p => _cacheClearList.has(p))
+    : _cacheClearTab === 'system'
+      ? _cacheClearSysPkgs
+      : _cacheClearAllPkgs;
 
   if (_cacheClearQuery) {
     const q = _cacheClearQuery.toLowerCase();
@@ -10630,8 +10747,10 @@ function _updateCachePopupCount() {
   const count = _cacheClearList.size;
   const selTab = document.getElementById('cache-popup-count-selected');
   const allTab = document.getElementById('cache-popup-count-all');
+  const sysTab = document.getElementById('cache-popup-count-system');
   const main   = document.getElementById('cache-popup-count');
   if (selTab) selTab.textContent = count;
   if (allTab) allTab.textContent = _cacheClearAllPkgs.length;
+  if (sysTab) sysTab.textContent = _cacheClearSysPkgs.length;
   if (main)   main.textContent   = `${count} app${count !== 1 ? 's' : ''} selected`;
 }
