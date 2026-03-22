@@ -6195,6 +6195,16 @@ function initGlobalSearch() {
       action: () => scrollToPanel('conn-launch-section', true) },
     { icon:'🛠', label:'FEATURES · FPS STABILITY',         sub:'Panel 11',  badge:'PANEL',
       action: () => scrollToPanel('features-section', true) },
+    { icon:'🎯', label:'FRAME STABILITY',                   sub:'Features → Frame Stability toggle', badge:'SETTING',
+      action: () => scrollToPanel('features-section', true, 'feat-frame-sub') },
+    { icon:'🔥', label:'ANTI-THROTTLE BOOST',               sub:'Features → Anti-Throttle toggle',   badge:'SETTING',
+      action: () => scrollToPanel('features-section', true, 'feat-throttle-sub') },
+    { icon:'🔥', label:'PYROX THERMAL',                     sub:'Features → Pyrox Thermal toggle',   badge:'SETTING',
+      action: () => scrollToPanel('features-section', true, 'feat-pyrox-sub') },
+    { icon:'❄️', label:'COOL MODE',                         sub:'Features → Cool Mode toggle',       badge:'SETTING',
+      action: () => scrollToPanel('features-section', true, 'feat-cool-sub') },
+    { icon:'⚡', label:'CPU VOLTS OPTIMIZER',               sub:'Features → CPU Volts Optimizer',    badge:'SETTING',
+      action: () => scrollToPanel('features-section', true, 'feat-cpuvolt-sub') },
 
     // ── Sub-panels / settings (common searches) ──
     { icon:'🔋', label:'CHARGE LIMIT',              sub:'Battery Section → Charge Limit',     badge:'SETTING',
@@ -6275,6 +6285,16 @@ function initGlobalSearch() {
       action: () => scrollToPanel('perapp-rr-section', true) },
   ];
 
+    { icon:'🛡', label:'STORM GUARD · BOOTLOOP PROTECTION',  sub:'Features → Storm Guard',   badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'📦', label:'BUSYBOX · BRUTAL BUSYBOX',            sub:'Features → Busybox',        badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'📷', label:'RAW CAMERA PATCH',                    sub:'Features → Raw Cam',        badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'💾', label:'ZRAM MANAGER',                        sub:'Features → ZRAM',           badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'🎭', label:'DEVICE SPOOF · GRAPHIC SPOOF',        sub:'Features → Spoof',          badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
   // ── Dynamic app index (built after loadAppList resolves) ──
   let _appIndex = [];   // { icon, label, sub, badge, pkg, action }
   let _appIndexReady = false;
@@ -6336,8 +6356,18 @@ function initGlobalSearch() {
     if (open && details && !details.open) details.open = true;
 
     // If a subpanel ID given, open it too
+    // Works for both <details> subpanels and adv-details (conn-bubble) inside panels
     const subEl = subId ? document.getElementById(subId) : null;
-    if (subEl && !subEl.open) subEl.open = true;
+    if (subEl) {
+      // Open the subpanel itself
+      if (!subEl.open) subEl.open = true;
+      // Also ensure any parent <details> within the section is open
+      let parent = subEl.parentElement;
+      while (parent && parent !== section) {
+        if (parent.tagName === 'DETAILS' && !parent.open) parent.open = true;
+        parent = parent.parentElement;
+      }
+    }
 
     // Determine the element to scroll to and glow
     const glowTarget = subEl || section;
@@ -9400,7 +9430,7 @@ function initFeaturesModal() {
    ═══════════════════════════════════════════════════════════ */
 
 const COOL_MODE_CFG    = `${CFG_DIR}/cool_mode_state`;
-const COOL_MODE_SCRIPT = `${MODDIR}/script_runner/cool_mode`;
+const COOL_MODE_SCRIPT = `${MOD}/script_runner/cool_mode`;
 
 let coolModeEnabled = false;
 
@@ -10380,23 +10410,24 @@ async function _loadCacheApps() {
   list.innerHTML = '<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">Loading apps…</div>';
 
   try {
-    const [rawUser, rawSystem] = await Promise.all([
-      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`),
-      exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`),
-    ]);
-    _cacheUserApps   = rawUser.trim().split('\n').filter(Boolean);
-    _cacheSystemApps = rawSystem.trim().split('\n').filter(Boolean);
+    // Load user apps first — shows immediately without waiting for system list
+    const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
+    _cacheUserApps = rawUser.trim().split('\n').filter(Boolean);
     _cacheLoaded = true;
 
-    // Update tab counts
     const uc = document.getElementById('cache-panel-count-user');
-    const sc = document.getElementById('cache-panel-count-system');
     if (uc) uc.textContent = _cacheUserApps.length;
-    if (sc) sc.textContent = _cacheSystemApps.length;
 
     _cachePanelTab = 'user';
     _cacheApps = _cacheUserApps;
     _renderCacheList(_cacheApps);
+
+    // Load system apps in background — tab count updates when ready
+    exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 12000).then(rawSystem => {
+      _cacheSystemApps = rawSystem.trim().split('\n').filter(Boolean);
+      const sc = document.getElementById('cache-panel-count-system');
+      if (sc) sc.textContent = _cacheSystemApps.length;
+    });
   } catch(e) {
     list.innerHTML = '<div class="mono" style="font-size:10px;color:#f87171;text-align:center;padding:16px;">Failed to load apps</div>';
   }
