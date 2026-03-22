@@ -6283,16 +6283,32 @@ function initGlobalSearch() {
       action: () => scrollToPanel('clear-cache-section', true) },
     { icon:'🗑', label:'CACHE CLEAR ON LAUNCH',     sub:'App/Game Config popup',             badge:'SETTING',
       action: () => scrollToPanel('perapp-rr-section', true) },
-    { icon:'🛡', label:'STORM GUARD · BOOTLOOP PROTECTION',  sub:'Features → Storm Guard',   badge:'SETTING',
+    { icon:'🛡', label:'STORM GUARD · BOOTLOOP PROTECTION',  sub:'Panel 11 · Features',      badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
-    { icon:'📦', label:'BUSYBOX · BRUTAL BUSYBOX',            sub:'Features → Busybox',        badge:'SETTING',
+    { icon:'📦', label:'BUSYBOX · BRUTAL BUSYBOX',            sub:'Panel 11 · Features',       badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
-    { icon:'📷', label:'RAW CAMERA PATCH',                    sub:'Features → Raw Cam',        badge:'SETTING',
+    { icon:'📷', label:'RAW CAMERA PATCH',                    sub:'Panel 11 · Features',       badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
-    { icon:'💾', label:'ZRAM MANAGER',                        sub:'Features → ZRAM',           badge:'SETTING',
+    { icon:'💾', label:'ZRAM · MEMORY MANAGER',               sub:'Panel 11 · Features',       badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
-    { icon:'🎭', label:'DEVICE SPOOF · GRAPHIC SPOOF',        sub:'Features → Spoof',          badge:'SETTING',
+    { icon:'🎭', label:'DEVICE SPOOF · GRAPHIC SPOOF · COPG', sub:'Panel 11 · Features',       badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
+    { icon:'⚡', label:'REMOVE LIMIT · 120HZ UNLOCK',         sub:'Panel 11 · Features',       badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'🎞', label:'ANIMATION FIX · HiOS FIX',            sub:'Panel 11 · Features',       badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'💤', label:'DEEP SLEEP GOVERNOR',                  sub:'Panel 11 · Features',       badge:'SETTING',
+      action: () => scrollToPanel('features-section', true) },
+    { icon:'⚡', label:'FAST CHARGE · SCP CHARGER',           sub:'Battery Section → Charge',  badge:'SETTING',
+      action: () => { scrollToPanel('idle-60hz-section', true);
+        setTimeout(() => document.getElementById('header-charge-bubble')?.setAttribute('open',''), 400); } },
+    { icon:'🔋', label:'CV VOLTAGE · CHARGE VOLTAGE',         sub:'Battery Section → Charge',  badge:'SETTING',
+      action: () => { scrollToPanel('idle-60hz-section', true);
+        setTimeout(() => document.getElementById('header-charge-bubble')?.setAttribute('open',''), 400); } },
+    { icon:'🛡', label:'AUTO 60HZ SPARE LIST',                sub:'Battery → Auto 60Hz Drop',  badge:'SETTING',
+      action: () => scrollToPanel('idle-60hz-section', true) },
+    { icon:'🖥', label:'IDLE 60HZ DROP DELAY',                sub:'Battery → Auto 60Hz → delay per app', badge:'SETTING',
+      action: () => scrollToPanel('idle-60hz-section', true) },
   ];
 
   // ── Dynamic app index (built after loadAppList resolves) ──
@@ -6372,24 +6388,29 @@ function initGlobalSearch() {
     // Determine the element to scroll to and glow
     const glowTarget = subEl || section;
 
+    // Wait for details expansion animation before scroll (details transition ~200ms)
+    const scrollDelay = subEl ? 300 : 120;
     setTimeout(() => {
-      glowTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => {
-        const glowClass = subEl ? 'adv-details--search-glow' : 'nexus-panel--search-glow';
+      // Use requestAnimationFrame for reliable post-layout scroll
+      requestAnimationFrame(() => {
+        glowTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setTimeout(() => {
+          const glowClass = subEl ? 'adv-details--search-glow' : 'nexus-panel--search-glow';
 
-        // Remove previous glow on ALL possible targets first
-        section.classList.remove('nexus-panel--search-glow');
-        section.querySelectorAll('.adv-details--search-glow')
-          .forEach(el => el.classList.remove('adv-details--search-glow'));
+          // Remove previous glow on ALL possible targets first
+          section.classList.remove('nexus-panel--search-glow');
+          section.querySelectorAll('.adv-details--search-glow')
+            .forEach(el => el.classList.remove('adv-details--search-glow'));
 
-        // Force reflow then add glow
-        void glowTarget.offsetWidth;
-        glowTarget.classList.add(glowClass);
-        glowTarget.addEventListener('animationend', () => {
-          glowTarget.classList.remove(glowClass);
-        }, { once: true });
-      }, 350);
-    }, 80);
+          // Force reflow then add glow
+          void glowTarget.offsetWidth;
+          glowTarget.classList.add(glowClass);
+          glowTarget.addEventListener('animationend', () => {
+            glowTarget.classList.remove(glowClass);
+          }, { once: true });
+        }, 400);
+      });
+    }, scrollDelay);
   }
 
   // ── Render dropdown ──────────────────────────────────────
@@ -6496,10 +6517,11 @@ function initGlobalSearch() {
         <span class="gs-item-badge">${entry.badge}</span>`;
       row.addEventListener('pointerdown', e => {
         e.preventDefault();
-        entry.action();
+        // Hide dropdown first, then action (prevents scroll fighting on mobile)
         input.value = '';
         clearBtn.hidden = true;
         results.hidden = true;
+        requestAnimationFrame(() => entry.action());
       });
       results.appendChild(row);
     });
