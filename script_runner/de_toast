@@ -1,0 +1,38 @@
+#!/system/bin/sh
+# =============================================================================
+#  DE_TOAST — System-level toast notification for DAVION ENGINE
+#  Shows a heads-up notification and auto-cancels after 4 seconds.
+#
+#  Usage:
+#    de_toast "Message text" ["Title"] ["short|long"]
+#
+#  Types: success (green), warn (orange), info (blue), error (red)
+#  Requires: Android 8+ with root (cmd notification)
+# =============================================================================
+
+MSG="${1:-DAVION ENGINE}"
+TITLE="${2:-DAVION ENGINE}"
+TYPE="${3:-info}"   # success | warn | error | info
+
+# Map type → emoji prefix for visual distinction
+case "$TYPE" in
+    success) PREFIX="✅" ;;
+    warn)    PREFIX="⚠️" ;;
+    error)   PREFIX="❌" ;;
+    *)       PREFIX="🔔" ;;
+esac
+
+NOTIF_TAG="de_toast_$(date +%s%3N)"
+
+# Post heads-up notification (auto-dismisses by Android after a few seconds)
+# -S bigtext = BigTextStyle (no truncation)
+# Importance HIGH triggers heads-up on Android 8+
+cmd notification post \
+    -S bigtext \
+    -t "${TITLE}" \
+    "${NOTIF_TAG}" \
+    "${PREFIX} ${MSG}" \
+    2>/dev/null
+
+# Auto-cancel after 4s in background so notification doesn't linger in shade
+(sleep 4 && cmd notification cancel "${NOTIF_TAG}" 2>/dev/null) &

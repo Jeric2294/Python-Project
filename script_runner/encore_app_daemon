@@ -33,8 +33,130 @@ _vol_last_fg_pkg=""
 _was_bg=""       # tracks if active game went to background
 _active_mode=""   # "gaming" | "lite" | ""
 _dnd_active=0
+_ko_cc_last_pkg=""  # last pkg for kill-others + cache-clear checks
 
 log_msg() { echo "[$(date '+%H:%M:%S')] [ENCORE-DAEMON] $1" >> "$LOG"; }
+
+# ── System-level toast via cmd notification ───────────────────
+# Usage: de_notify "Message" ["Title"] ["success|warn|error|info"]
+de_notify() {
+    local msg="$1"
+    local title="${2:-DAVION ENGINE}"
+    local type="${3:-info}"
+    [ -x "$DE_TOAST" ] && "$DE_TOAST" "$msg" "$title" "$type" 2>/dev/null &
+}
+
+# ── Get human-readable app label from package name ────────────
+get_app_label() {
+    local pkg="$1"
+    local label
+    label=$(pm dump "$pkg" 2>/dev/null \
+        | grep -m1 "nonLocalizedLabel" \
+        | sed 's/.*nonLocalizedLabel=//' \
+        | tr -d '"' | tr -d '\r')
+    [ -n "$label" ] && echo "$label" && return
+    echo "$pkg"
+}
+
+# ── Kill other foreground apps for a package ──────────────────
+# Reads $RR_DIR/$pkg.killothers (flag) + $RR_DIR/$pkg.killothers_bl (spare list)
+kill_others_for_pkg() {
+    local pkg="$1"
+    [ -f "$RR_DIR/$pkg.killothers" ] || return
+
+    local spare_list="$pkg"
+    if [ -f "$RR_DIR/$pkg.killothers_bl" ]; then
+        spare_list="$spare_list
+$(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
+    fi
+
+    local killed=0
+    local skipped=0
+    local running
+    running=$(dumpsys activity processes 2>/dev/null \
+        | grep "ProcessRecord" \
+        | grep -oE 'com\.[a-zA-Z0-9._]+|[a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9._]+' \
+        | sort -u)
+
+    for target in $running; do
+        echo "$spare_list" | grep -qFx "$target" && continue
+        echo "$target" | grep -q '\.' || continue
+        case "$target" in
+            android|com.android.systemui|com.android.phone|\
+            com.android.settings|com.android.launcher*|\
+            com.google.android.gms|com.google.android.gsf) continue ;;
+        esac
+
+        # Only count apps that are actually running (have a live PID)
+        # pidof returns empty if the process is already dead/stopped
+        local pids
+        pids=$(pidof "$target" 2>/dev/null)
+        if [ -z "$pids" ]; then
+            skipped=$((skipped + 1))
+            log_msg "  KO: $target already stopped — skipping"
+            continue
+        fi
+
+        am force-stop "$target" 2>/dev/null
+        killed=$((killed + 1))
+        log_msg "  KO: force-stopped $target (pids: $pids)"
+    done
+
+    local label
+    label=$(get_app_label "$pkg")
+    if [ "$killed" -gt 0 ]; then
+        de_notify "${killed} apps killed for ${label}" "KILL OTHERS" "warn"
+        log_msg "Kill Others: $killed killed, $skipped already stopped — for $pkg"
+    elif [ "$skipped" -gt 0 ]; then
+        log_msg "Kill Others: all $skipped apps already stopped — nothing to kill for $pkg"
+    else
+        log_msg "Kill Others: nothing to kill for $pkg"
+    fi
+}
+
+# ── Clear cache on launch for a package ───────────────────────
+# Reads $RR_DIR/$pkg.cacheclear (flag) + $RR_DIR/$pkg.cacheclear_list (targets)
+clear_cache_for_pkg() {
+    local pkg="$1"
+    [ -f "$RR_DIR/$pkg.cacheclear" ] || return
+    [ -f "$RR_DIR/$pkg.cacheclear_list" ] || return
+
+    local cleared=0
+    local skipped=0
+    local target
+    while IFS= read -r target; do
+        [ -z "$target" ] && continue
+
+        # Check if the cache dir actually has data before clearing
+        # /data/data/$pkg/cache — size 0 or missing means already empty
+        local cache_size=0
+        cache_size=$(du -sk "/data/data/$target/cache" 2>/dev/null | cut -f1)
+        # Also check /data/user/0/$pkg/cache for multi-user setups
+        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
+            cache_size=$(du -sk "/data/user/0/$target/cache" 2>/dev/null | cut -f1)
+        fi
+
+        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
+            skipped=$((skipped + 1))
+            log_msg "  CacheClr: $target cache already empty — skipping"
+            continue
+        fi
+
+        pm clear "$target" 2>/dev/null && {
+            cleared=$((cleared + 1))
+            log_msg "  CacheClr: cleared $target (was ~${cache_size}KB)"
+        }
+    done < "$RR_DIR/$pkg.cacheclear_list"
+
+    local label
+    label=$(get_app_label "$pkg")
+    if [ "$cleared" -gt 0 ]; then
+        de_notify "${cleared} app cache(s) cleared" "${label}" "success"
+        log_msg "Cache Clear: $cleared cleared, $skipped already empty — for $pkg"
+    elif [ "$skipped" -gt 0 ]; then
+        log_msg "Cache Clear: all $skipped caches already empty — nothing to clear for $pkg"
+    fi
+}
 
 # ── Get current foreground package ───────────────────────────
 get_foreground_pkg() {
@@ -303,6 +425,7 @@ apply_per_app_conn() {
                 cmd wifi enable-wifi 2>/dev/null || true
                 _conn_wifi_enabled_by="$pkg"
                 log_msg "  Conn: WiFi enabled for $pkg"
+                de_notify "WiFi enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
             else
                 log_msg "  Conn: WiFi already ON — skipping for $pkg"
             fi
@@ -314,6 +437,7 @@ apply_per_app_conn() {
                 svc data enable 2>/dev/null
                 _conn_data_enabled_by="$pkg"
                 log_msg "  Conn: Data enabled for $pkg"
+                de_notify "Mobile Data enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
             else
                 log_msg "  Conn: Data already ON — skipping for $pkg"
             fi
@@ -329,11 +453,13 @@ restore_conn() {
         cmd wifi disable-wifi 2>/dev/null || true
         _conn_wifi_enabled_by=""
         log_msg "  Conn: WiFi restored OFF (was enabled for $leaving_pkg)"
+        de_notify "WiFi auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
     fi
     if [ -n "$_conn_data_enabled_by" ] && [ "$_conn_data_enabled_by" = "$leaving_pkg" ]; then
         svc data disable 2>/dev/null
         _conn_data_enabled_by=""
         log_msg "  Conn: Data restored OFF (was enabled for $leaving_pkg)"
+        de_notify "Data auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
     fi
 }
 
@@ -389,6 +515,21 @@ activate_tweaks() {
     _active_pkg="$pkg"
     # Signal to battery_guard not to override the governor
     echo "$pkg" > /dev/.encore_tweaks_active 2>/dev/null
+
+    # ── System toast: notify user that tweaks are active ──────
+    local _label
+    _label=$(get_app_label "$pkg")
+    if [ "$lite_mode" = "true" ]; then
+        de_notify "Lite Gaming Mode → ${_label}" "DAVION ENGINE" "info"
+    else
+        de_notify "Gaming Mode → ${_label}" "DAVION ENGINE" "success"
+    fi
+
+    # ── Kill Others: force-stop other apps now ────────────────
+    kill_others_for_pkg "$pkg" &
+
+    # ── Cache Clear: clear caches of configured apps ──────────
+    clear_cache_for_pkg "$pkg" &
 }
 
 # ── Deactivate tweaks and revert to normal ────────────────────
@@ -416,6 +557,9 @@ _was_bg=""       # tracks if active game went to background
     _active_mode=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"
+
+    # ── System toast: notify user tweaks are off ──────────────
+    de_notify "Normal mode restored" "DAVION ENGINE" "info"
 }
 
 # ── Main monitor loop ─────────────────────────────────────────
@@ -481,6 +625,19 @@ while true; do
         # Apply conn for new foreground app (skips if wifi/data already on)
         [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.conn" ] && \
             apply_per_app_conn "$current_pkg"
+    fi
+
+    # ── Kill Others + Cache Clear — fires on real app change ─────────────
+    # Encore apps are handled inside activate_tweaks — skip them here to avoid
+    # double execution. Non-Encore apps with these flags are handled here.
+    if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
+        _ko_cc_last_pkg="$current_pkg"
+        if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
+            [ -f "$RR_DIR/$current_pkg.killothers" ] && kill_others_for_pkg "$current_pkg" &
+            [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
+                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && \
+                clear_cache_for_pkg "$current_pkg" &
+        fi
     fi
 
     # ── Detect if active game went to background ─────────────

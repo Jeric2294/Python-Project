@@ -260,8 +260,27 @@ function initFabSettings(){
   const fabBubble = document.getElementById("fab-theme-bubble");
   const menuTheme   = document.getElementById("fab-menu-theme");
   const menuBrowser = document.getElementById("fab-menu-browser");
+  const menuToast   = document.getElementById("fab-menu-toast");
   const menuExit  = document.getElementById("fab-menu-exit");
   if(!fabBtn) return;
+
+  // ── Restore toast toggle state from disk ──────────────────
+  exec(`cat ${TOAST_CFG_FILE} 2>/dev/null`).then(raw => {
+    const saved = raw.trim();
+    if (saved === '0') {
+      _toastEnabled = false;
+      _syncToastMenuItem(false);
+    }
+  });
+
+  function _syncToastMenuItem(on) {
+    const icon  = document.getElementById('fab-toast-icon');
+    const label = document.getElementById('fab-toast-label');
+    if (menuToast) menuToast.setAttribute('aria-pressed', String(on));
+    if (icon)  icon.textContent  = on ? '🔔' : '🔕';
+    if (label) label.textContent = on ? 'TOAST ON' : 'TOAST OFF';
+    if (menuToast) menuToast.style.opacity = on ? '1' : '0.5';
+  }
 
   let menuOpen   = false;
   let bubbleOpen = false;
@@ -309,6 +328,17 @@ function initFabSettings(){
     showToast('Opening WebUI in browser…', 'BROWSER', 'info', '🌐');
   });
 
+  menuToast?.addEventListener("click", async e=>{
+    e.stopPropagation();
+    _toastEnabled = !_toastEnabled;
+    _syncToastMenuItem(_toastEnabled);
+    await exec(`mkdir -p ${CFG_DIR} && echo '${_toastEnabled ? '1' : '0'}' > ${TOAST_CFG_FILE}`);
+    // Show one confirmation toast only when turning ON
+    if (_toastEnabled) {
+      showToast('Toast notifications enabled', 'TOAST', 'success', '🔔');
+    }
+  });
+
   menuExit.addEventListener("click", async e=>{
     e.stopPropagation();
     closeAll();
@@ -346,7 +376,11 @@ function setStatus(msg,color){
 }
 /* ── Toast notifications ─────────────────────────────────── */
 let _tid = 0;
+let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
+const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
+
 function showToast(msg, title='', type='success', icon='', dur=2800) {
+  if (!_toastEnabled) return;
   const wrap = document.getElementById('toast-container');
   if (!wrap) return;
   if (!icon) icon = {success:'✓',info:'ℹ',warn:'⚠',error:'✕'}[type] || '◈';
@@ -5899,10 +5933,13 @@ function _buildIdle60Row(pkg) {
   });
 
   row.querySelector('[data-i60spare]')?.addEventListener('click', async () => {
-    if (_idle60SpareSet.has(pkg)) {
+    const nowSpared = !_idle60SpareSet.has(pkg);
+    if (!nowSpared) {
       _idle60SpareSet.delete(pkg);
+      showToast(`${getAppLabel(pkg)} will drop to 60Hz when idle`, 'AUTO 60HZ', 'info', '🖥️');
     } else {
       _idle60SpareSet.add(pkg);
+      showToast(`${getAppLabel(pkg)} spared from 60Hz drop`, 'AUTO 60HZ', 'success', '🛡');
     }
     await _saveIdle60Spare();
     renderIdle60List();
@@ -5945,6 +5982,7 @@ function _showIdle60DelayPicker(pkg, rowEl) {
         delete _idle60DelayMap[pkg];
       } else {
         _idle60DelayMap[pkg] = val;
+        showToast(`${getAppLabel(pkg)} idle delay → ${val}s`, 'AUTO 60HZ', 'info', '⏱');
       }
       await _saveIdle60Delays();
       renderIdle60List();
@@ -7001,16 +7039,19 @@ function _buildBattSaverRow(pkg) {
     </div>`;
 
   row.querySelector('[data-bsspare]')?.addEventListener('click', async () => {
-    if (_battSaverSpareSet.has(pkg)) {
+    const nowSpared = !_battSaverSpareSet.has(pkg);
+    if (!nowSpared) {
       _battSaverSpareSet.delete(pkg);
       // Unspared — restore battery saver immediately if enabled
       if (_battSaverEnabled) {
         await exec(`settings put global low_power 1 2>/dev/null`);
       }
+      showToast(`Battery Saver applies to ${getAppLabel(pkg)}`, 'BATT SAVER', 'info', '🔋');
     } else {
       _battSaverSpareSet.add(pkg);
       // Spared — check if this is the currently running app, disable saver immediately
       await exec(`FG=$(cat /dev/.davion_last_fg_pkg 2>/dev/null); [ "$FG" = "${pkg}" ] && settings put global low_power 0 2>/dev/null || true`);
+      showToast(`${getAppLabel(pkg)} spared from Battery Saver`, 'BATT SAVER', 'success', '🛡');
     }
     const pkgs = [..._battSaverSpareSet];
     const cmds = pkgs.length
@@ -10314,6 +10355,15 @@ async function _clearSelectedCache() {
 
   status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
   status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
+
+  if (cleared > 0) {
+    showToast(
+      `${cleared} app cache${cleared !== 1 ? 's' : ''} cleared${failed > 0 ? ` · ${failed} failed` : ''}`,
+      'CACHE', failed > 0 ? 'warn' : 'success', '🗑'
+    );
+  } else if (failed > 0) {
+    showToast(`Failed to clear ${failed} app cache${failed !== 1 ? 's' : ''}`, 'CACHE', 'error', '🗑');
+  }
 
   _cacheSelected.clear();
   _renderCacheList(_cacheApps);
