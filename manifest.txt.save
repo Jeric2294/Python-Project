@@ -1,0 +1,7 @@
+action.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/action.sh
+service.sh https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/service.sh
+webroot/index.html https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/index.html
+webroot/style.css https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/style.css
+webroot/script.js https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/script.js
+script_runner/idle60_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/idle60_daemon
+script_runner/rr_guard https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/rr_guard
