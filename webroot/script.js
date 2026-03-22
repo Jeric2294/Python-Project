@@ -6283,8 +6283,6 @@ function initGlobalSearch() {
       action: () => scrollToPanel('clear-cache-section', true) },
     { icon:'🗑', label:'CACHE CLEAR ON LAUNCH',     sub:'App/Game Config popup',             badge:'SETTING',
       action: () => scrollToPanel('perapp-rr-section', true) },
-  ];
-
     { icon:'🛡', label:'STORM GUARD · BOOTLOOP PROTECTION',  sub:'Features → Storm Guard',   badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
     { icon:'📦', label:'BUSYBOX · BRUTAL BUSYBOX',            sub:'Features → Busybox',        badge:'SETTING',
@@ -6295,6 +6293,8 @@ function initGlobalSearch() {
       action: () => scrollToPanel('features-section', true) },
     { icon:'🎭', label:'DEVICE SPOOF · GRAPHIC SPOOF',        sub:'Features → Spoof',          badge:'SETTING',
       action: () => scrollToPanel('features-section', true) },
+  ];
+
   // ── Dynamic app index (built after loadAppList resolves) ──
   let _appIndex = [];   // { icon, label, sub, badge, pkg, action }
   let _appIndexReady = false;
