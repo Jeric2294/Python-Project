@@ -12,7 +12,7 @@ LOG="$MODDIR/ota.log"
 BB="$MODDIR/busybox"
 
 GITHUB_USER="Jeric2294"
-GITHUB_REPO="DAVION09-ENGINE"
+GITHUB_REPO="Python-Project"
 BRANCH="main"
 
 MANIFEST_URL="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$BRANCH/manifest.txt"
