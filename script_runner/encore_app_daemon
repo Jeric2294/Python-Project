@@ -465,20 +465,6 @@ while true; do
         fi
     fi
 
-    # ── Per-app Volume — fires for ALL apps on foreground change ────
-    if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
-        _prev_vol_pkg="$_vol_last_fg_pkg"
-        _vol_last_fg_pkg="$current_pkg"
-        # Restore volume for app that left focus (only if it had per-app vol)
-        if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
-            restore_volume
-        fi
-        # Apply per-app volume for new foreground app
-        if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
-            apply_per_app_volume "$current_pkg"
-        fi
-    fi
-
     # ── Per-app Connection on Launch — fires ONLY on real app change ──
     # Rule: WiFi/Data is enabled ONLY if currently OFF.
     # If WiFi is already ON (enabled by another app or user), skip — don't touch it.
@@ -513,6 +499,14 @@ while true; do
         fi
         dnd_val=$(get_enable_dnd "$current_pkg")
         activate_tweaks "$current_pkg" "$effective_lite" "$dnd_val"
+    fi
+
+    # ── Per-app Volume — apply AFTER deactivate/activate to avoid override ──
+    if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
+        _vol_last_fg_pkg="$current_pkg"
+        if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
+            apply_per_app_volume "$current_pkg"
+        fi
     fi
 
     sleep 1
