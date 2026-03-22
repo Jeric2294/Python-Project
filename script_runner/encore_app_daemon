@@ -549,6 +549,8 @@ deactivate_tweaks() {
 
     _active_pkg=""
     _active_mode=""
+    # Reset vol tracker so next foreground app always re-applies its volume
+    _vol_last_fg_pkg=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"
 
@@ -585,6 +587,19 @@ while true; do
                 deactivate_tweaks "$_active_pkg"
                 activate_tweaks "$_active_pkg" "$local_lite" "$dnd_val"
             fi
+        fi
+    fi
+
+    # ── Vol retrigger — WebUI signals after saving vol config ──
+    if [ -f /dev/.davion_vol_retrigger ]; then
+        local retrig_pkg
+        retrig_pkg=$(cat /dev/.davion_vol_retrigger 2>/dev/null | tr -d '[:space:]')
+        rm -f /dev/.davion_vol_retrigger 2>/dev/null
+        if [ -n "$retrig_pkg" ] && [ -f "$RR_DIR/$retrig_pkg.vol" ]; then
+            apply_per_app_volume "$retrig_pkg"
+            # Force re-check next tick
+            _vol_last_fg_pkg=""
+            log_msg "Vol retrigger: re-applied for $retrig_pkg"
         fi
     fi
 
@@ -680,7 +695,8 @@ while true; do
     if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
         _vol_last_fg_pkg="$current_pkg"
         if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
-            apply_per_app_volume "$current_pkg"
+            # Small delay — let app acquire audio focus before forcing volume
+            (sleep 0.5 && apply_per_app_volume "$current_pkg") &
         fi
     fi
 
