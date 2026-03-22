@@ -14,13 +14,12 @@ BB="$MODDIR/busybox"
 GITHUB_USER="Jeric2294"
 GITHUB_REPO="Python-Project"
 BRANCH="main"
-
-MANIFEST_URL="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$BRANCH/manifest.txt"
+RAW="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$BRANCH"
 
 log() { echo "[$(date '+%H:%M:%S')] $1" | tee -a "$LOG"; }
 
-# === Required files — hardcoded list ===
-REQUIRED_FILES="
+# === Files to update — URLs built from RAW automatically ===
+FILES="
 action.sh
 service.sh
 post-fs-data.sh
@@ -58,18 +57,6 @@ DAVION_ENGINE/AI_MODE/cpu_governor_control
 DAVION_ENGINE/AI_MODE/de_cpu_engine
 "
 
-is_required() {
-    target="$1"
-    for f in $REQUIRED_FILES; do
-        [ "$f" = "$target" ] && return 0
-    done
-    return 1
-}
-
-download() {
-    /data/adb/modules/GovThermal/busybox wget -q --timeout=15 -O "$2" "$1" 2>/dev/null
-}
-
 # ── HEADER ───────────────────────────────────────────────────
 ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 ui_print "  DAVION09 ENGINE — OTA Update"
@@ -80,7 +67,7 @@ log "=== ACTION START ==="
 # ── CHECK NETWORK ────────────────────────────────────────────
 ui_print ""
 ui_print "⚙ Checking network..."
-if ! "$BB" wget -q --timeout=5 -O /dev/null "1.1.1.1" 2>/dev/null; then
+if ! "$BB" wget -q --timeout=5 -O /dev/null "https://1.1.1.1" 2>/dev/null; then
     ui_print "✗ No internet connection!"
     log "ERROR: No network"
     ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -88,49 +75,31 @@ if ! "$BB" wget -q --timeout=5 -O /dev/null "1.1.1.1" 2>/dev/null; then
 fi
 ui_print "✔ Network OK"
 
-# ── DOWNLOAD MANIFEST ────────────────────────────────────────
-ui_print "⚙ Fetching manifest from GitHub..."
-mkdir -p "$TMP"
-
-if ! download "$MANIFEST_URL" "$TMP/manifest.txt" || [ ! -s "$TMP/manifest.txt" ]; then
-    ui_print "✗ Cannot reach GitHub. Try again later."
-    log "ERROR: manifest download failed"
-    rm -rf "$TMP"
-    ui_print "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    exit 1
-fi
-ui_print "✔ Manifest fetched"
-
-# ── FETCH EACH REQUIRED FILE ─────────────────────────────────
+# ── FETCH FILES ──────────────────────────────────────────────
 ui_print "↓ Downloading latest files..."
+mkdir -p "$TMP"
 updated=0
 failed=0
 
-while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    case "$line" in \#*) continue ;; esac
+for rel_path in $FILES; do
+    [ -z "$rel_path" ] && continue
 
-    rel_path=$(echo "$line" | cut -d' ' -f1)
-    url=$(echo "$line"      | cut -d' ' -f2- | xargs)
+    url="$RAW/$rel_path"
+    target="$MODDIR/$rel_path"
+    mkdir -p "$(dirname "$target")" 2>/dev/null
 
-    [ -z "$rel_path" ] || [ -z "$url" ] && continue
-
-    if is_required "$rel_path"; then
-        target="$MODDIR/$rel_path"
-        mkdir -p "$(dirname "$target")" 2>/dev/null
-
-        if download "$url" "$TMP/tmpfile" && [ -s "$TMP/tmpfile" ]; then
-            cp "$TMP/tmpfile" "$target"
-            chmod 755 "$target" 2>/dev/null
-            log "✔ $rel_path"
-            updated=$((updated + 1))
-        else
-            log "✗ FAILED: $rel_path"
-            failed=$((failed + 1))
-        fi
+    if "$BB" wget -q --timeout=15 \
+        -O "$TMP/tmpfile" "$url" 2>/dev/null \
+        && [ -s "$TMP/tmpfile" ]; then
+        cp "$TMP/tmpfile" "$target"
+        chmod 755 "$target" 2>/dev/null
+        log "✔ $rel_path"
+        updated=$((updated + 1))
+    else
+        log "✗ FAILED: $rel_path"
+        failed=$((failed + 1))
     fi
-
-done < "$TMP/manifest.txt"
+done
 
 # ── FIX PERMISSIONS ──────────────────────────────────────────
 find "$MODDIR" -name "*.sh" -exec chmod +x {} \; 2>/dev/null
