@@ -39,6 +39,9 @@ script_runner/ai_thermal_predict
 script_runner/ai_adaptive_freq
 script_runner/ai_app_classifier
 script_runner/encore_app_daemon
+script_runner/hot_reload_daemon
+script_runner/de_toast
+script_runner/cool_mode
 script_runner/global
 script_runner/display_mode
 script_runner/davion_engine_eem_boot

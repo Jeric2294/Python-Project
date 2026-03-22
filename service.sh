@@ -654,6 +654,13 @@ fi
         log_msg "RR Guard daemon started (PID $!)"
     fi
 
+    # ── Hot Reload Daemon ──────────────────────────────────────
+    HOT_RELOAD_DAEMON="$MODDIR/script_runner/hot_reload_daemon"
+    chmod 755 "$HOT_RELOAD_DAEMON" 2>/dev/null
+    pkill -f "hot_reload_daemon" 2>/dev/null
+    nohup sh "$HOT_RELOAD_DAEMON" >> "$LOG" 2>&1 &
+    log_msg "Hot Reload daemon started (PID $!)"
+
     sleep 0
 
 

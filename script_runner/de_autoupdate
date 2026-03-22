@@ -1,0 +1,182 @@
+#!/system/bin/sh
+# =============================================================================
+#  DE_AUTOUPDATE — Auto-fetch and apply updates on WebUI load
+#
+#  Called by WebUI on DOMContentLoaded.
+#  Fetches manifest.txt → compares md5 → downloads changed files → restarts.
+#
+#  Writes status to /dev/.davion_update_status for WebUI to read.
+# =============================================================================
+
+MODDIR="/data/adb/modules/GovThermal"
+BB="$MODDIR/busybox"
+LOG="$MODDIR/service.log"
+DE_TOAST="$MODDIR/script_runner/de_toast"
+MANIFEST_URL="https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/manifest.txt"
+STATUS_FILE="/dev/.davion_update_status"
+LOCK_FILE="/dev/.davion_update_running"
+TMP_DIR="/data/local/tmp/davion_update"
+
+log_msg() { echo "[$(date '+%H:%M:%S')] [AUTOUPDATE] $1" >> "$LOG"; }
+notify() { [ -x "$DE_TOAST" ] && "$DE_TOAST" "$1" "UPDATE" "$2" 2>/dev/null & }
+set_status() { echo "$1" > "$STATUS_FILE" 2>/dev/null; }
+
+# ── Prevent concurrent runs ───────────────────────────────────
+if [ -f "$LOCK_FILE" ]; then
+    # Check if lock is stale (older than 5 minutes)
+    local_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0) ))
+    if [ "$local_age" -lt 300 ]; then
+        log_msg "Already running — skipping"
+        exit 0
+    fi
+    rm -f "$LOCK_FILE"
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
+
+# ── Check connectivity ────────────────────────────────────────
+if ! "$BB" wget -q --timeout=5 -O /dev/null "https://1.1.1.1" 2>/dev/null; then
+    log_msg "No internet — skipping update check"
+    set_status "offline"
+    exit 0
+fi
+
+set_status "checking"
+log_msg "Checking for updates..."
+
+# ── Fetch manifest ────────────────────────────────────────────
+mkdir -p "$TMP_DIR"
+MANIFEST_TMP="$TMP_DIR/manifest.txt"
+if ! "$BB" wget -q --timeout=15 -O "$MANIFEST_TMP" "$MANIFEST_URL" 2>/dev/null; then
+    log_msg "Failed to fetch manifest"
+    set_status "error"
+    exit 1
+fi
+
+# ── Compare and collect changed files ────────────────────────
+changed_files=""
+changed_count=0
+_needs_httpd=0
+_needs_encore=0
+_needs_rr_guard=0
+_needs_idle60=0
+_needs_battery_guard=0
+_needs_headset=0
+
+mark_restart() {
+    case "$1" in
+        webroot/*)             _needs_httpd=1 ;;
+        script_runner/encore_app_daemon) _needs_encore=1 ;;
+        script_runner/rr_guard)          _needs_rr_guard=1 ;;
+        script_runner/idle60_daemon)     _needs_idle60=1 ;;
+        script_runner/battery_guard)     _needs_battery_guard=1 ;;
+        script_runner/headset_daemon)    _needs_headset=1 ;;
+    esac
+}
+
+while IFS= read -r line; do
+    # Skip comments and empty lines
+    echo "$line" | grep -q "^#" && continue
+    [ -z "$(echo "$line" | tr -d '[:space:]')" ] && continue
+
+    rel_path=$(echo "$line" | awk '{print $1}')
+    url=$(echo "$line" | awk '{print $2}')
+    [ -z "$rel_path" ] || [ -z "$url" ] && continue
+
+    local_file="$MODDIR/$rel_path"
+
+    # Download to temp
+    tmp_file="$TMP_DIR/$(echo "$rel_path" | tr '/' '_')"
+    if ! "$BB" wget -q --timeout=20 -O "$tmp_file" "$url" 2>/dev/null; then
+        log_msg "  Download failed: $rel_path"
+        continue
+    fi
+
+    # Compare md5 — only apply if different
+    if [ -f "$local_file" ]; then
+        local_md5=$(md5sum "$local_file" 2>/dev/null | cut -d' ' -f1)
+        new_md5=$(md5sum "$tmp_file" 2>/dev/null | cut -d' ' -f1)
+        if [ "$local_md5" = "$new_md5" ]; then
+            rm -f "$tmp_file"
+            continue  # No change
+        fi
+    fi
+
+    # File is new or changed — apply it
+    mkdir -p "$(dirname "$local_file")" 2>/dev/null
+    if mv -f "$tmp_file" "$local_file" 2>/dev/null; then
+        chmod 755 "$local_file" 2>/dev/null
+        mark_restart "$rel_path"
+        changed_files="$changed_files\n  • $rel_path"
+        changed_count=$((changed_count + 1))
+        log_msg "  Updated: $rel_path"
+    fi
+done < "$MANIFEST_TMP"
+
+rm -rf "$TMP_DIR"
+
+# ── Nothing changed ───────────────────────────────────────────
+if [ "$changed_count" = "0" ]; then
+    log_msg "Already up to date"
+    set_status "up_to_date"
+    exit 0
+fi
+
+log_msg "Updated $changed_count file(s)"
+set_status "updated:$changed_count"
+
+# ── Restart affected services ─────────────────────────────────
+restarted=""
+
+if [ "$_needs_httpd" = "1" ]; then
+    pkill -f "httpd.*8080" 2>/dev/null
+    sleep 1
+    "$BB" httpd -p 8080 -h "$MODDIR/webroot" -c "$MODDIR/httpd.conf" >> "$LOG" 2>&1 &
+    restarted="WebUI"
+    log_msg "  Restarted: httpd"
+fi
+
+if [ "$_needs_encore" = "1" ]; then
+    pkill -f "encore_app_daemon" 2>/dev/null
+    sleep 0.5
+    sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
+    restarted="$restarted Encore"
+    log_msg "  Restarted: encore_app_daemon"
+fi
+
+if [ "$_needs_rr_guard" = "1" ]; then
+    pkill -f "rr_guard" 2>/dev/null
+    sleep 0.5
+    sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
+    restarted="$restarted RRGuard"
+fi
+
+if [ "$_needs_idle60" = "1" ]; then
+    pkill -f "idle60_daemon" 2>/dev/null
+    sleep 0.5
+    sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
+    restarted="$restarted Idle60"
+fi
+
+if [ "$_needs_battery_guard" = "1" ]; then
+    pkill -f "battery_guard" 2>/dev/null
+    sleep 0.5
+    sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
+    restarted="$restarted BattGuard"
+fi
+
+if [ "$_needs_headset" = "1" ]; then
+    pkill -f "headset_daemon" 2>/dev/null
+    sleep 0.5
+    sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
+    restarted="$restarted Headset"
+fi
+
+# ── Toast + final status ──────────────────────────────────────
+msg="${changed_count} file(s) updated"
+[ -n "$restarted" ] && msg="$msg · Restarted:$restarted"
+notify "$msg" "success"
+log_msg "Update complete: $msg"
+
+# Signal WebUI to reload if webroot changed
+[ "$_needs_httpd" = "1" ] && echo "reload" >> "$STATUS_FILE"

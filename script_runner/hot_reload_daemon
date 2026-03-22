@@ -1,0 +1,248 @@
+#!/system/bin/sh
+# =============================================================================
+#  HOT RELOAD DAEMON — Auto-apply module updates without Termux
+#  
+#  Usage:
+#    Drop any DAVION*.zip into /sdcard/DAVION_ENGINE/hot_reload/
+#    Daemon will auto-detect, extract, apply, and restart affected services.
+#
+#  Watch dir: /sdcard/DAVION_ENGINE/hot_reload/
+#  Backup dir: /sdcard/DAVION_ENGINE/hot_reload/backup/
+#  Log: /sdcard/GovThermal/GovThermal.log
+# =============================================================================
+
+MODDIR="/data/adb/modules/GovThermal"
+WATCH_DIR="/sdcard/DAVION_ENGINE/hot_reload"
+BACKUP_DIR="$WATCH_DIR/backup"
+LOG="$MODDIR/service.log"
+BB="$MODDIR/busybox"
+DE_TOAST="$MODDIR/script_runner/de_toast"
+
+log_msg() { echo "[$(date '+%H:%M:%S')] [HOT_RELOAD] $1" >> "$LOG"; }
+
+# ── Toast helper ──────────────────────────────────────────────
+notify() {
+    local msg="$1" type="${2:-info}"
+    [ -x "$DE_TOAST" ] && "$DE_TOAST" "$msg" "HOT RELOAD" "$type" 2>/dev/null &
+}
+
+# ── Detect which services need restart based on changed files ─
+_needs_httpd=0
+_needs_encore=0
+_needs_rr_guard=0
+_needs_idle60=0
+_needs_battery_guard=0
+_needs_headset=0
+
+mark_restart() {
+    local f="$1"
+    case "$f" in
+        webroot/*)
+            _needs_httpd=1 ;;
+        script_runner/encore_app_daemon)
+            _needs_encore=1 ;;
+        script_runner/rr_guard)
+            _needs_rr_guard=1 ;;
+        script_runner/idle60_daemon)
+            _needs_idle60=1 ;;
+        script_runner/battery_guard)
+            _needs_battery_guard=1 ;;
+        script_runner/headset_daemon)
+            _needs_headset=1 ;;
+        script_runner/cool_mode|\
+        script_runner/de_toast|\
+        script_runner/thermal_toggle|\
+        DAVION_ENGINE/*)
+            : ;; # no restart needed — called on-demand
+        service.sh|post-fs-data.sh|customize.sh)
+            log_msg "  Note: $f requires reboot to take full effect" ;;
+    esac
+}
+
+# ── Backup a file before overwriting ─────────────────────────
+backup_file() {
+    local src="$1"   # relative path e.g. webroot/script.js
+    local full="$MODDIR/$src"
+    [ -f "$full" ] || return
+    local dst="$BACKUP_DIR/$src"
+    mkdir -p "$(dirname "$dst")" 2>/dev/null
+    cp -f "$full" "$dst" 2>/dev/null
+}
+
+# ── Apply zip ─────────────────────────────────────────────────
+apply_zip() {
+    local zip="$1"
+    local zip_name
+    zip_name=$(basename "$zip")
+    log_msg "=== Hot Reload: $zip_name ==="
+
+    # Reset restart flags
+    _needs_httpd=0
+    _needs_encore=0
+    _needs_rr_guard=0
+    _needs_idle60=0
+    _needs_battery_guard=0
+    _needs_headset=0
+
+    notify "Applying $zip_name…" "info"
+
+    # ── Get file list from zip ────────────────────────────────
+    local file_list
+    file_list=$("$BB" unzip -l "$zip" 2>/dev/null | awk 'NR>3 && $NF !~ /\/$/ {print $NF}' | grep -v "^$\|META-INF\|updater-script\|update-binary")
+
+    if [ -z "$file_list" ]; then
+        log_msg "ERROR: empty or invalid zip"
+        notify "Failed: empty zip" "error"
+        rm -f "$zip"
+        return 1
+    fi
+
+    local applied=0
+    local failed=0
+    local changed_files=""
+
+    # ── Extract and apply each file ───────────────────────────
+    for rel_path in $file_list; do
+        [ -z "$rel_path" ] && continue
+
+        local dest="$MODDIR/$rel_path"
+        local dest_dir
+        dest_dir=$(dirname "$dest")
+
+        # Skip files outside our module scope
+        case "$rel_path" in
+            webroot/*|\
+            script_runner/*|\
+            DAVION_ENGINE/*|\
+            logcat_detection/*|\
+            service.sh|\
+            post-fs-data.sh|\
+            customize.sh|\
+            system.prop|\
+            module.prop|\
+            httpd.conf|\
+            service.d/*|\
+            booster_mode|\
+            README.md)
+                : ;;  # allowed
+            *)
+                log_msg "  Skipping non-module file: $rel_path"
+                continue ;;
+        esac
+
+        # Backup existing file
+        backup_file "$rel_path"
+
+        # Extract to temp
+        mkdir -p "$dest_dir" 2>/dev/null
+        if "$BB" unzip -p "$zip" "$rel_path" > "$dest" 2>/dev/null; then
+            chmod 755 "$dest" 2>/dev/null
+            mark_restart "$rel_path"
+            applied=$((applied + 1))
+            changed_files="$changed_files $rel_path"
+            log_msg "  Applied: $rel_path"
+        else
+            failed=$((failed + 1))
+            log_msg "  FAILED: $rel_path"
+        fi
+    done
+
+    log_msg "Applied: $applied files, Failed: $failed files"
+
+    # ── Restart affected services ─────────────────────────────
+    local restarted=""
+
+    if [ "$_needs_httpd" = "1" ]; then
+        pkill -f "httpd.*8080" 2>/dev/null
+        sleep 1
+        "$BB" httpd -p 8080 \
+            -h "$MODDIR/webroot" \
+            -c "$MODDIR/httpd.conf" \
+            >> "$LOG" 2>&1 &
+        restarted="$restarted WebUI"
+        log_msg "  Restarted: httpd"
+    fi
+
+    if [ "$_needs_encore" = "1" ]; then
+        pkill -f "encore_app_daemon" 2>/dev/null
+        sleep 1
+        sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
+        restarted="$restarted Encore"
+        log_msg "  Restarted: encore_app_daemon"
+    fi
+
+    if [ "$_needs_rr_guard" = "1" ]; then
+        pkill -f "rr_guard" 2>/dev/null
+        sleep 0.5
+        sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
+        restarted="$restarted RRGuard"
+        log_msg "  Restarted: rr_guard"
+    fi
+
+    if [ "$_needs_idle60" = "1" ]; then
+        pkill -f "idle60_daemon" 2>/dev/null
+        sleep 0.5
+        sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
+        restarted="$restarted Idle60"
+        log_msg "  Restarted: idle60_daemon"
+    fi
+
+    if [ "$_needs_battery_guard" = "1" ]; then
+        pkill -f "battery_guard" 2>/dev/null
+        sleep 0.5
+        sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
+        restarted="$restarted BattGuard"
+        log_msg "  Restarted: battery_guard"
+    fi
+
+    if [ "$_needs_headset" = "1" ]; then
+        pkill -f "headset_daemon" 2>/dev/null
+        sleep 0.5
+        sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
+        restarted="$restarted Headset"
+        log_msg "  Restarted: headset_daemon"
+    fi
+
+    # ── Done notification ─────────────────────────────────────
+    if [ "$failed" = "0" ]; then
+        local msg="${applied} files applied"
+        [ -n "$restarted" ] && msg="$msg ·${restarted} restarted"
+        notify "$msg" "success"
+        log_msg "Hot Reload SUCCESS: $zip_name"
+    else
+        notify "${applied} applied, ${failed} failed" "warn"
+        log_msg "Hot Reload PARTIAL: $zip_name"
+    fi
+
+    # ── Move zip to backup (keep last 3) ──────────────────────
+    mkdir -p "$BACKUP_DIR/zips" 2>/dev/null
+    mv -f "$zip" "$BACKUP_DIR/zips/$zip_name" 2>/dev/null
+
+    # Keep only last 3 zips in backup
+    ls -t "$BACKUP_DIR/zips/"*.zip 2>/dev/null | tail -n +4 | xargs rm -f 2>/dev/null
+
+    log_msg "=== Done ==="
+}
+
+# ── Main watch loop ───────────────────────────────────────────
+mkdir -p "$WATCH_DIR" "$BACKUP_DIR" 2>/dev/null
+log_msg "Hot Reload Daemon started — watching $WATCH_DIR"
+notify "Hot Reload ready — drop zip to $WATCH_DIR" "info"
+
+while true; do
+    # Find any .zip in the watch dir (not in subdirs)
+    for zip in "$WATCH_DIR"/*.zip; do
+        [ -f "$zip" ] || continue
+        # Wait briefly to ensure file is fully written (download complete)
+        sleep 2
+        # Verify it's a valid zip
+        if "$BB" unzip -t "$zip" > /dev/null 2>&1; then
+            apply_zip "$zip"
+        else
+            log_msg "Invalid zip: $zip — skipping"
+            notify "Invalid zip: $(basename "$zip")" "error"
+            mv -f "$zip" "$BACKUP_DIR/zips/invalid_$(basename "$zip")" 2>/dev/null
+        fi
+    done
+    sleep 5
+done

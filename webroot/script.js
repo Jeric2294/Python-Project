@@ -2826,9 +2826,10 @@ async function applyRefreshLock() {
   const vv = volSlider ? parseInt(volSlider.value) : -1;
   if (vv >= 0) {
     await exec(`mkdir -p ${RR_DIR} && echo '${vv}' > ${RR_DIR}/${currentPkg}.vol`);
-    // Apply now immediately
+    // Apply now — use both AudioManager (persistent) and media session (active playback)
+    await exec(`media volume --stream 3 --set ${vv} 2>/dev/null || settings put system volume_music ${vv} 2>/dev/null`);
     await exec(`cmd media_session volume --stream 3 --set ${vv} 2>/dev/null; true`);
-    // Signal volume daemon to re-apply
+    // Signal daemon to re-apply on next app switch
     await exec(`echo "${currentPkg}" > /dev/.davion_vol_retrigger 2>/dev/null`);
   } else {
     await exec(`rm -f ${RR_DIR}/${currentPkg}.vol`);
@@ -3813,6 +3814,36 @@ function initGamingThermal() {
    § 14  Main init
    ═══════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded',async()=>{
+  // ── Auto-update: run in background, show toast when done ──
+  const AUTO_UPDATE_SCRIPT = `${MOD}/script_runner/de_autoupdate`;
+  const STATUS_FILE = '/dev/.davion_update_status';
+
+  // Clear previous status
+  exec(`rm -f ${STATUS_FILE} 2>/dev/null`).then(() => {
+    // Run updater in background (non-blocking)
+    exec(`chmod 755 "${AUTO_UPDATE_SCRIPT}" 2>/dev/null && sh "${AUTO_UPDATE_SCRIPT}" &`);
+
+    // Poll for result every 3s, max 60s
+    let _updatePoll = 0;
+    const _updateTimer = setInterval(async () => {
+      _updatePoll++;
+      if (_updatePoll > 20) { clearInterval(_updateTimer); return; }
+      const status = (await exec(`cat ${STATUS_FILE} 2>/dev/null`)).trim();
+      if (!status || status === 'checking') return;
+      clearInterval(_updateTimer);
+      if (status.startsWith('updated:')) {
+        const count = status.split(':')[1];
+        showToast(`${count} file(s) updated from GitHub`, 'AUTO UPDATE', 'success', '🔄');
+        // If webroot changed, reload page after short delay
+        const fullStatus = (await exec(`cat ${STATUS_FILE} 2>/dev/null`)).trim();
+        if (fullStatus.includes('reload')) {
+          setTimeout(() => location.reload(), 2500);
+        }
+      }
+      // 'up_to_date', 'offline', 'error' — silent, no toast
+    }, 3000);
+  });
+
   initTheme();
   initFabSettings();
   _initAllSliderFills();
@@ -6279,6 +6310,8 @@ function initGlobalSearch() {
       action: () => _searchApplyTheme('black') },
     { icon:'📡', label:'OVERLAY',                 sub:'Header → Overlay toggle',         badge:'SETTING',
       action: () => document.getElementById('stat-overlay')?.click() },
+    { icon:'🔄', label:'HOT RELOAD · AUTO UPDATE',        sub:'Drop zip to /sdcard/DAVION_ENGINE/hot_reload/', badge:'SETTING',
+      action: () => showToast('Drop zip to /sdcard/DAVION_ENGINE/hot_reload/', 'HOT RELOAD', 'info', '🔄') },
     { icon:'🗑', label:'CLEAR APP CACHE',           sub:'Panel 12 · Clear cache per app',   badge:'PANEL',
       action: () => scrollToPanel('clear-cache-section', true) },
     { icon:'🗑', label:'CACHE CLEAR ON LAUNCH',     sub:'App/Game Config popup',             badge:'SETTING',
