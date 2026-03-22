@@ -567,6 +567,38 @@ deactivate_tweaks() {
 log_msg "Started — monitoring foreground app for Encore tweaks"
 FLAG_FILE="/dev/.encore_gamelist_updated"
 
+# ── Logcat-based volume watcher (parallel) ────────────────────
+# Fires on wm_on_resume_called = app has window + audio focus
+# More reliable than polling for volume apply timing
+(
+    logcat -b events -T 1 2>/dev/null | while IFS= read -r line; do
+        case "$line" in
+            *"wm_on_resume_called"*|*"am_on_resume_called"*|            *"top_resumed_app_focus"*|*"am_resume_activity"*)
+                # Extract package name from logcat line
+                pkg=$(echo "$line" | grep -oE '[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+){1,}' |                     grep -v "^android$\|systemui\|android\.server\|android\.app\|wm\.\|am\." |                     head -1)
+                [ -z "$pkg" ] && continue
+                # Skip system processes
+                case "$pkg" in
+                    android|com.android.systemui|com.android.phone|                    com.android.shell|com.topjohnwu.magisk) continue ;;
+                esac
+                # Apply per-app volume if configured
+                vol_file="$RR_DIR/$pkg.vol"
+                if [ -f "$vol_file" ]; then
+                    vv=$(tr -d '[:space:]' < "$vol_file")
+                    if [ -n "$vv" ] && [ "$vv" -ge 0 ] 2>/dev/null; then
+                        # App has focus now — volume apply will work
+                        media volume --stream 3 --set "$vv" 2>/dev/null ||                             settings put system volume_music "$vv" 2>/dev/null
+                        cmd media_session volume --stream 3 --set "$vv" 2>/dev/null; true
+                        log_msg "  Vol(logcat): $vv for $pkg"
+                    fi
+                fi
+                ;;
+        esac
+    done
+) &
+_logcat_vol_pid=$!
+log_msg "Logcat vol watcher started (PID $_logcat_vol_pid)"
+
 while true; do
 
     # Skip if gamelist doesn't exist (Encore not installed / no apps configured)

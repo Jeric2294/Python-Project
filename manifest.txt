@@ -23,10 +23,6 @@ script_runner/global https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE
 script_runner/display_mode https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/display_mode
 script_runner/davion_engine_eem_boot https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/davion_engine_eem_boot
 script_runner/davion_engine_manual https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/davion_engine_manual
-script_runner/de_autoupdate https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/de_autoupdate
-script_runner/hot_reload_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/hot_reload_daemon
-script_runner/cool_mode https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/cool_mode
-script_runner/de_toast https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/de_toast
 logcat_detection/logcat https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/logcat_detection/logcat
 logcat_detection/dumpsys2 https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/logcat_detection/dumpsys2
 webroot/index.html https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/webroot/index.html
