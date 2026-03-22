@@ -1338,6 +1338,55 @@
       </details>
     </section>
 
+
+    <!-- ── PANEL 12: CLEAR APP CACHE ─────────────────────────── -->
+    <section class="nexus-panel" id="clear-cache-section" data-pnum="12">
+      <details class="panel-details" id="clear-cache-panel">
+        <summary class="panel-summary">
+          <div class="panel-header">
+            <div class="panel-icon" style="background:rgba(var(--a-rgb),0.12);">🗑</div>
+            <div>
+              <div class="panel-title mono">CLEAR APP CACHE</div>
+              <div class="mono" style="font-size:8px;color:var(--dim);margin-top:2px;">Free up space by clearing app cache</div>
+            </div>
+          </div>
+          <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </summary>
+
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
+
+          <!-- Search bar -->
+          <div style="display:flex;align-items:center;gap:8px;background:rgba(var(--a-rgb),0.04);border:0.2px solid rgba(var(--a-rgb),0.22);border-radius:var(--radius);padding:8px 12px;">
+            <span class="mono" style="color:var(--dim);font-size:13px;">⌕</span>
+            <input id="cache-search-input" type="search" autocomplete="off" spellcheck="false"
+              placeholder="Search apps…"
+              style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--mono);font-size:11px;letter-spacing:0.04em;"
+              oninput="_filterCacheApps(this.value)">
+          </div>
+
+          <!-- Action buttons -->
+          <div style="display:flex;gap:8px;">
+            <button class="nexus-btn" onclick="_selectAllCacheApps()" style="flex:1;padding:8px;font-size:10px;">SELECT ALL</button>
+            <button class="nexus-btn" onclick="_clearSelectedCache()" id="btn-clear-cache"
+              style="flex:1;padding:8px;font-size:10px;background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.5);color:#f87171;">
+              🗑 CLEAR SELECTED
+            </button>
+          </div>
+
+          <!-- Status -->
+          <div id="cache-clear-status" class="mono" style="font-size:9px;color:var(--dim);display:none;padding:6px 10px;background:rgba(var(--a-rgb),0.06);border-radius:6px;"></div>
+
+          <!-- App list -->
+          <div id="cache-app-list" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto;">
+            <div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">
+              Loading apps…
+            </div>
+          </div>
+
+        </div>
+      </details>
+    </section>
+
   <!-- Per-App Config Bubble (mirrors FAB theme bubble style) -->
   <div id="floating-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Game Configuration" style="display:none;">
     <div class="app-config-bubble">

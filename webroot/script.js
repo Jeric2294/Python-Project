@@ -10090,3 +10090,137 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
+
+/* ═══════════════════════════════════════════════════════════
+   CLEAR APP CACHE — Panel 12
+   ═══════════════════════════════════════════════════════════ */
+
+let _cacheApps = [];
+let _cacheSelected = new Set();
+let _cacheLoaded = false;
+
+// Load panel when opened
+document.addEventListener('DOMContentLoaded', () => {
+  const panel = document.getElementById('clear-cache-panel');
+  if (panel) {
+    panel.addEventListener('toggle', () => {
+      if (panel.open && !_cacheLoaded) _loadCacheApps();
+    });
+  }
+});
+
+async function _loadCacheApps() {
+  const list = document.getElementById('cache-app-list');
+  if (!list) return;
+  list.innerHTML = '<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">Loading apps…</div>';
+
+  try {
+    // Get all user-installed apps
+    const raw = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`);
+    _cacheApps = raw.trim().split('\n').filter(Boolean);
+    _cacheLoaded = true;
+    _renderCacheList(_cacheApps);
+  } catch(e) {
+    list.innerHTML = '<div class="mono" style="font-size:10px;color:#f87171;text-align:center;padding:16px;">Failed to load apps</div>';
+  }
+}
+
+function _renderCacheList(apps) {
+  const list = document.getElementById('cache-app-list');
+  if (!list) return;
+
+  if (!apps.length) {
+    list.innerHTML = '<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">No apps found</div>';
+    return;
+  }
+
+  list.innerHTML = apps.map(pkg => {
+    const label = getAppLabel ? getAppLabel(pkg) : pkg;
+    const checked = _cacheSelected.has(pkg);
+    return `
+      <div class="conn-bubble" style="padding:8px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;"
+        onclick="_toggleCacheSelect('${pkg}', this)">
+        <div style="width:16px;height:16px;border:0.2px solid var(--bdr);border-radius:4px;flex-shrink:0;
+          background:${checked ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;"
+          id="cache-chk-${pkg.replace(/\./g,'_')}">
+          ${checked ? '<span style="color:#000;font-size:11px;">✓</span>' : ''}
+        </div>
+        <div style="min-width:0;flex:1;">
+          <div class="mono" style="font-size:10px;color:var(--fg);letter-spacing:0.04em;">${label.toUpperCase()}</div>
+          <div class="mono" style="font-size:8px;color:var(--dim);">${pkg}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function _toggleCacheSelect(pkg, row) {
+  if (_cacheSelected.has(pkg)) {
+    _cacheSelected.delete(pkg);
+  } else {
+    _cacheSelected.add(pkg);
+  }
+  // Update checkbox visual
+  const id = 'cache-chk-' + pkg.replace(/\./g, '_');
+  const chk = document.getElementById(id);
+  const checked = _cacheSelected.has(pkg);
+  if (chk) {
+    chk.style.background = checked ? 'var(--a)' : 'transparent';
+    chk.innerHTML = checked ? '<span style="color:#000;font-size:11px;">✓</span>' : '';
+  }
+  _updateClearBtn();
+}
+
+function _selectAllCacheApps() {
+  const allSelected = _cacheApps.every(p => _cacheSelected.has(p));
+  if (allSelected) {
+    _cacheSelected.clear();
+  } else {
+    _cacheApps.forEach(p => _cacheSelected.add(p));
+  }
+  _renderCacheList(_cacheApps);
+  _updateClearBtn();
+}
+
+function _updateClearBtn() {
+  const btn = document.getElementById('btn-clear-cache');
+  if (btn) btn.textContent = `🗑 CLEAR (${_cacheSelected.size})`;
+}
+
+function _filterCacheApps(query) {
+  const q = query.toLowerCase();
+  const filtered = q
+    ? _cacheApps.filter(p => p.toLowerCase().includes(q) || (getAppLabel && getAppLabel(p).toLowerCase().includes(q)))
+    : _cacheApps;
+  _renderCacheList(filtered);
+}
+
+async function _clearSelectedCache() {
+  if (!_cacheSelected.size) return;
+  const status = document.getElementById('cache-clear-status');
+  const btn = document.getElementById('btn-clear-cache');
+
+  status.style.display = 'block';
+  status.style.color = 'var(--a)';
+  status.textContent = `⚙ Clearing ${_cacheSelected.size} app(s)…`;
+  if (btn) btn.disabled = true;
+
+  let cleared = 0;
+  let failed = 0;
+
+  for (const pkg of _cacheSelected) {
+    const result = await exec(`pm clear --cache-only ${pkg} 2>/dev/null || rm -rf /data/data/${pkg}/cache 2>/dev/null && echo OK`);
+    if (result.includes('Success') || result.includes('OK')) {
+      cleared++;
+    } else {
+      failed++;
+    }
+  }
+
+  status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
+  status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
+
+  _cacheSelected.clear();
+  _renderCacheList(_cacheApps);
+  _updateClearBtn();
+  if (btn) btn.disabled = false;
+}
