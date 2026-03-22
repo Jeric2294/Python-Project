@@ -351,8 +351,6 @@ restore_saturation() {
 # ── Per-app screen off timeout ────────────────────────────────
 # Tracks the pkg whose screen timeout is currently overriding the universal.
 _screentimeout_active_pkg=""
-_vol_last_fg_pkg=""
-_was_bg=""       # tracks if active game went to background
 _st_last_fg_pkg=""   # dedicated fg tracker — fires only on real app change
 
 # ── Per-app Connection on Launch ──────────────────────────────
@@ -377,8 +375,6 @@ apply_per_app_screentimeout() {
 restore_screentimeout() {
     [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
     _screentimeout_active_pkg=""
-_vol_last_fg_pkg=""
-_was_bg=""       # tracks if active game went to background
     # Restore to universal lock if set, else system default (30s)
     if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
         local ums
@@ -552,8 +548,6 @@ deactivate_tweaks() {
     disable_dnd
 
     _active_pkg=""
-_vol_last_fg_pkg=""
-_was_bg=""       # tracks if active game went to background
     _active_mode=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"

@@ -1351,6 +1351,73 @@
             </div>
           </details><!-- /anti-throttle panel -->
 
+
+          <!-- ── TOGGLE 3: PYROX THERMAL ────────────────────────────── -->
+          <details class="adv-details conn-bubble" style="flex-direction:column;align-items:stretch;padding:0;">
+            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <span style="font-size:18px;flex-shrink:0;">🔥</span>
+                <div style="min-width:0;">
+                  <div class="mono" style="font-size:11px;font-weight:700;letter-spacing:.07em;color:var(--fg);">PYROX THERMAL</div>
+                  <div class="mono" style="font-size:8px;color:var(--dim);margin-top:2px;">Removes all thermal limits · 125°C ceiling · GPU unlocked</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                <button id="btn-pyrox-thermal" class="gaming-toggle-btn popup-toggle-btn--danger" aria-pressed="false" onclick="event.stopPropagation()" style="flex-shrink:0;">
+                  <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
+                  <span class="gaming-toggle-label mono" id="pyrox-thermal-label">DISABLED</span>
+                </button>
+                <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+            </summary>
+            <div style="border-top:1px solid var(--bdr);padding:10px 14px 14px;display:flex;flex-direction:column;gap:6px;">
+              <div class="gaming-status-ribbon" id="pyrox-status-ribbon" style="margin-bottom:4px;">
+                <span class="mono gaming-ribbon-icon" id="pyrox-ribbon-icon">🛡</span>
+                <span class="mono gaming-ribbon-text" id="pyrox-ribbon-text">Pyrox thermal engine inactive — system throttling in effect</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">Thermal svc: <span id="pyrox-svc-status" style="color:var(--a);">RUNNING</span></span></div>
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">PPM: <span id="pyrox-ppm-status" style="color:var(--a);">ACTIVE</span></span></div>
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">GPU limits: <span id="pyrox-gpu-status" style="color:var(--a);">ENFORCED</span></span></div>
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">TZ CPU: <span id="pyrox-tzcpu-status" style="color:var(--a);">DEFAULT</span></span></div>
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">CPU limits: <span id="pyrox-cpu-status" style="color:var(--a);">NORMAL</span></span></div>
+                <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">Thermal zones: <span id="pyrox-zones-status" style="color:var(--a);">ENABLED</span></span></div>
+              </div>
+              <div class="mono" style="font-size:8px;color:#f59e0b;padding:4px 8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:6px;margin-top:2px;">
+                ⚠ Device may overheat — use only during gaming sessions
+              </div>
+            </div>
+          </details><!-- /pyrox thermal -->
+
+          <!-- ── TOGGLE 4: CPU VOLTS OPTIMIZER ──────────────────────── -->
+          <details class="adv-details conn-bubble" style="flex-direction:column;align-items:stretch;padding:0;">
+            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <span style="font-size:18px;flex-shrink:0;">⚡</span>
+                <div style="min-width:0;">
+                  <div class="mono" style="font-size:11px;font-weight:700;letter-spacing:.07em;color:var(--fg);">CPU VOLTS OPTIMIZER</div>
+                  <div class="mono" style="font-size:8px;color:var(--dim);margin-top:2px;">EEM voltage offset · reduces heat & improves battery</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                <button id="btn-cpuvolt-toggle" class="gaming-toggle-btn popup-toggle-btn--danger" aria-pressed="false" onclick="event.stopPropagation()" style="flex-shrink:0;">
+                  <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
+                  <span class="gaming-toggle-label mono" id="cpuvolt-label">OFF</span>
+                </button>
+                <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              </div>
+            </summary>
+            <div style="border-top:1px solid var(--bdr);padding:10px 14px 14px;display:flex;flex-direction:column;gap:5px;">
+              <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">EEM_DET_B (Prime): <span id="cpuvolt-b-val" style="color:var(--a);">0</span></span></div>
+              <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">EEM_DET_BL (Big): <span id="cpuvolt-bl-val" style="color:var(--a);">0</span></span></div>
+              <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">EEM_DET_L (Little): <span id="cpuvolt-l-val" style="color:var(--a);">0</span></span></div>
+              <div class="feat-detail-row"><span class="feat-dot"></span><span class="mono feat-detail-text">EEM_DET_CCI: <span id="cpuvolt-cci-val" style="color:var(--a);">0</span></span></div>
+              <div class="mono" style="font-size:8px;color:var(--dim);padding:4px 8px;background:rgba(var(--a-rgb),0.04);border:1px solid rgba(var(--a-rgb),0.15);border-radius:6px;margin-top:2px;">
+                ℹ Resets on reboot — persisted via service.sh on next boot
+              </div>
+            </div>
+          </details><!-- /cpu volts optimizer -->
+
         </div>
       </details>
     </section>

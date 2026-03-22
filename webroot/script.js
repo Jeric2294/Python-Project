@@ -375,7 +375,6 @@ function setStatus(msg,color){
   clearTimeout(_st);_st=setTimeout(()=>{el.textContent='SYS READY · MODULE ONLINE';el.style.color='';},2800);
 }
 /* ── Toast notifications ─────────────────────────────────── */
-let _tid = 0;
 let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
 const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
 
@@ -2455,11 +2454,7 @@ async function openPopup(pkg, gearElement, isGame = false) {
   _killothersBlLoaded = false;
   // (Kill Others is now managed in Panel 06 — no popup state to reset)
 
-  const _blWrap   = null; // removed from popup
-  const _blList   = null;
-  const _blCount  = null;
-  const _blSearch = null;
-  const _blClear  = null;
+
 
   // Connection on Launch is now managed in Panel 07 — not loaded here
   // Kill Others is now managed in Panel 06 — not loaded here
@@ -3893,6 +3888,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initUniversalVolume();
   initUniversalScreenTimeout();
   initHeadsetConfig();
+  initCpuVoltOptimizer();
   initPyroxThermal();
   initBrightnessSlider();
   initVolumeSlider();
@@ -9394,6 +9390,79 @@ function initFeaturesModal() {
     renderAnimationState();
   }
   restoreFeatureColors();
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   § CPU VOLTS OPTIMIZER — MTK EEM offset tuning
+   Reduces voltage on all CPU clusters via /proc/eem nodes.
+   Values: Prime/Big/Little = -12, CCI = -8
+   ═══════════════════════════════════════════════════════════ */
+
+const CPUVOLT_CFG = `${CFG_DIR}/cpuvolt_enabled`;
+const EEM_BASE    = '/proc/eem';
+
+const CPUVOLT_OFFSETS = [
+  { node: 'EEM_DET_B',   val: '-12', id: 'cpuvolt-b-val'   },
+  { node: 'EEM_DET_BL',  val: '-12', id: 'cpuvolt-bl-val'  },
+  { node: 'EEM_DET_L',   val: '-12', id: 'cpuvolt-l-val'   },
+  { node: 'EEM_DET_CCI', val: '-8',  id: 'cpuvolt-cci-val' },
+];
+
+let cpuVoltEnabled = false;
+
+function renderCpuVoltState() {
+  const btn   = document.getElementById('btn-cpuvolt-toggle');
+  const label = document.getElementById('cpuvolt-label');
+  btn?.setAttribute('aria-pressed', String(cpuVoltEnabled));
+  btn?.classList.toggle('gaming-toggle-btn--on', cpuVoltEnabled);
+  if (label) label.textContent = cpuVoltEnabled ? 'ON' : 'OFF';
+  CPUVOLT_OFFSETS.forEach(o => {
+    const el = document.getElementById(o.id);
+    if (el) {
+      el.textContent = cpuVoltEnabled ? o.val : '0';
+      el.style.color = cpuVoltEnabled ? 'var(--a)' : 'var(--dim)';
+    }
+  });
+}
+
+async function applyCpuVolt(enable) {
+  if (enable) {
+    const cmds = CPUVOLT_OFFSETS.map(o =>
+      `echo '${o.val}' > ${EEM_BASE}/${o.node}/eem_offset 2>/dev/null`
+    ).join(' && ');
+    await exec(`${cmds}`);
+    await exec(`mkdir -p ${CFG_DIR} && echo '1' > ${CPUVOLT_CFG}`);
+    cpuVoltEnabled = true;
+    showToast('CPU Volts optimized · heat & battery improved', 'CPU VOLTS', 'success', '⚡');
+    setStatus('⚡ CPU Volts Optimizer ON', 'var(--a)');
+  } else {
+    const cmds = CPUVOLT_OFFSETS.map(o =>
+      `echo '0' > ${EEM_BASE}/${o.node}/eem_offset 2>/dev/null`
+    ).join(' && ');
+    await exec(`${cmds}`);
+    await exec(`mkdir -p ${CFG_DIR} && echo '0' > ${CPUVOLT_CFG}`);
+    cpuVoltEnabled = false;
+    showToast('CPU Volts reset to default', 'CPU VOLTS', 'info', '⚡');
+    setStatus('⚡ CPU Volts Optimizer OFF', '');
+  }
+  renderCpuVoltState();
+}
+
+function initCpuVoltOptimizer() {
+  document.getElementById('btn-cpuvolt-toggle')?.addEventListener('click', () => {
+    applyCpuVolt(!cpuVoltEnabled);
+  });
+
+  // Restore saved state
+  waitForBridge(8000).then(() =>
+    exec(`cat ${CPUVOLT_CFG} 2>/dev/null`).then(raw => {
+      if (raw.trim() === '1') {
+        // Re-apply offsets on load (resets on reboot)
+        applyCpuVolt(true);
+      }
+    })
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════
