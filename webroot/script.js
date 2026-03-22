@@ -2871,20 +2871,31 @@ async function applyRefreshLock() {
     await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear ${RR_DIR}/${currentPkg}.cacheclear_list`);
   }
 
-  // Badge: all per-app settings (conn + kill state read from disk)
-  const hasMode   = !!modeId;
-  const hasBright = bv >= 0;
-  const hasVol    = vv >= 0;
-  const hasFd     = fdOn;
-  updateConfiguredBadge(currentPkg, hasMode || hasBright || hasVol || hasFd);
+  // Badge: all per-app settings
+  const hasMode     = !!modeId;
+  const hasBright   = bv >= 0;
+  const hasVol      = vv >= 0;
+  const hasFd       = fdOn;
+  const hasKo       = curKoOn;
+  const hasConn     = !!curConn;
+  const hasCache    = curCacheOn;
+  const hasEncore   = encoreOn && encoreSaveResult?.ok;
+  const hasSpare    = document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true';
+  const hasAnything = hasMode || hasBright || hasVol || hasFd || hasKo || hasConn || hasCache || hasEncore || hasSpare;
 
-  if (hasMode || hasBright || hasVol || hasFd) {
+  updateConfiguredBadge(currentPkg, hasAnything);
+
+  if (hasAnything) {
     const parts = [];
-    if (hasMode)      parts.push(sel.querySelector('.radio-label').textContent);
-    if (hasBright)    parts.push(`☀${bv}`);
-    if (hasVol)       parts.push(`🔊${vv}`);
-    if (hasFd)        parts.push(`🌑DARK`);
-    if (encoreOn && encoreSaveResult?.ok) parts.push(`🍬ENCORE`);
+    if (hasMode)    parts.push(sel.querySelector('.radio-label').textContent);
+    if (hasBright)  parts.push(`☀${bv}`);
+    if (hasVol)     parts.push(`🔊${vv}`);
+    if (hasFd)      parts.push(`🌑DARK`);
+    if (hasEncore)  parts.push(`🍬ENCORE`);
+    if (hasKo)      parts.push(`⏹KO`);
+    if (hasConn)    parts.push(`📶${curConn.toUpperCase()}`);
+    if (hasCache)   parts.push(`🗑CACHE`);
+    if (hasSpare)   parts.push(`🛡SPARE`);
     showToast(`${getAppLabel(currentPkg)} → ${parts.join(' · ')}`, 'PER-APP', 'success', '🔒');
     setStatus(`🔒 ${getAppLabel(currentPkg)} → ${parts.join(' · ')}`);
   } else {
