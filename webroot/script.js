@@ -447,6 +447,7 @@ async function toggleOverlay() {
   setStatus(`Overlay ${overlayOn ? 'ON' : 'OFF'}`);
   exec(`su -c "service call SurfaceFlinger 1034 i32 ${overlayOn ? 1 : 0}"`);
   exec(`echo ${overlayOn ? 'on' : 'off'} > ${RR_CFG}/overlay_state`);
+  showToast(`Overlay ${overlayOn ? 'ON' : 'OFF'}`, 'OVERLAY', overlayOn ? 'success' : 'info', overlayOn ? '🟢' : '⭕');
 }
 
 async function toggleDetect() {
@@ -460,6 +461,7 @@ async function toggleDetect() {
   } else {
     exec(`touch ${RR_CFG}/enable_dumpsys && rm -f ${RR_CFG}/enable_logcat`);
   }
+  showToast(`Detection: ${toLogcat ? 'Logcat' : 'Dumpsys'}`, 'DETECT', 'info', toLogcat ? '📋' : '📡');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2545,17 +2547,18 @@ async function openPopup(pkg, gearElement, isGame = false) {
     if (cacheBtn._cacheHandler) cacheBtn.removeEventListener('click', cacheBtn._cacheHandler);
     cacheBtn._cacheHandler = async () => {
       const cur = cacheBtn.getAttribute('aria-pressed') === 'true';
-      const next = !cur;
-      cacheBtn.setAttribute('aria-pressed', String(next));
-      cacheBtn.classList.toggle('gaming-toggle-btn--on', next);
-      if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
-      if (next) {
-        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
-        // Open sub-popup to select apps
+      if (cur) {
+        // Already ON — re-open popup to edit app list, do NOT toggle off
         _openCacheClearPopup(pkg);
-      } else {
-        await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear ${RR_DIR}/${pkg}.cacheclear_list`);
+        return;
       }
+      // Turning ON
+      cacheBtn.setAttribute('aria-pressed', 'true');
+      cacheBtn.classList.add('gaming-toggle-btn--on');
+      if (cacheLabel) cacheLabel.textContent = 'ON';
+      await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
+      // Open sub-popup to select apps
+      _openCacheClearPopup(pkg);
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
@@ -7599,6 +7602,17 @@ function _closeKoPopup() {
     // Close immediately so user gets instant feedback
     popup.style.display = 'none';
   }
+  if (_koPopupPkg) {
+    const state = _koState[_koPopupPkg];
+    const appName = typeof _koFriendlyName === 'function' ? _koFriendlyName(_koPopupPkg) : _koPopupPkg;
+    if (state?.on) {
+      const spareCount = state.bl?.size ?? 0;
+      showToast(
+        spareCount > 0 ? `Kill Others ON · ${spareCount} spared` : 'Kill Others ON · no exceptions',
+        appName.toUpperCase(), 'warn', '⏹'
+      );
+    }
+  }
   _koPopupPkg = null;
   renderKoList();
 }
@@ -10398,6 +10412,13 @@ async function _openCacheClearPopup(pkg) {
 function _closeCacheClearPopup() {
   const overlay = document.getElementById('cache-clear-popup');
   if (overlay) overlay.style.display = 'none';
+  const count = _cacheClearList.size;
+  const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
+  if (count > 0) {
+    showToast(`${count} app${count !== 1 ? 's' : ''} will be cleared on launch`, appName.toUpperCase(), 'success', '🗑');
+  } else {
+    showToast('No apps selected for cache clear', appName.toUpperCase(), 'info', '🗑');
+  }
 }
 
 function _renderCachePopupList() {
