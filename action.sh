@@ -1,4 +1,4 @@
-#!/system/bin/sh
+GITHUB_REPO="DAVION09-ENGINE"#!/system/bin/sh
 # ============================================================
 #  DAVION09 ENGINE — Action Handler
 #  Author: Jeric Aparicio
@@ -15,7 +15,7 @@ GITHUB_USER="Jeric2294"
 GITHUB_REPO="DAVION09-ENGINE"
 BRANCH="main"
 
-MANIFEST_URL="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$BRANCH/manifest.txt"
+MANIFEST_URL="https://raw.githubusercontent.com/Jeric2294/Python-Project/main/manifest.txt"
 
 log() { echo "[$(date '+%H:%M:%S')] $1" | tee -a "$LOG"; }
 
