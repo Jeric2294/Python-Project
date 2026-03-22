@@ -2370,7 +2370,7 @@ async function openPopup(pkg, gearElement, isGame = false) {
 
   // Show/hide game-only blocks based on caller context
   // Encore is game-only; Kill Others + Connection on Launch work for all apps
-  const gameOnlyBlocks = ['popup-encore-block'];
+  const gameOnlyBlocks = [];
   gameOnlyBlocks.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isGame ? '' : 'none';
