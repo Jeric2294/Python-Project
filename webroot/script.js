@@ -6177,6 +6177,10 @@ function initGlobalSearch() {
       action: () => _searchApplyTheme('black') },
     { icon:'📡', label:'OVERLAY',                 sub:'Header → Overlay toggle',         badge:'SETTING',
       action: () => document.getElementById('stat-overlay')?.click() },
+    { icon:'🗑', label:'CLEAR APP CACHE',           sub:'Panel 12 · Clear cache per app',   badge:'PANEL',
+      action: () => scrollToPanel('clear-cache-section', true) },
+    { icon:'🗑', label:'CACHE CLEAR ON LAUNCH',     sub:'App/Game Config popup',             badge:'SETTING',
+      action: () => scrollToPanel('perapp-rr-section', true) },
   ];
 
   // ── Dynamic app index (built after loadAppList resolves) ──
@@ -10173,16 +10177,8 @@ function _renderCacheList(apps) {
       </div>`;
   }).join('');
 
-  // Load icons same as other panels
-  list.querySelectorAll('.app-icon-wrap[data-pkg]').forEach(wrap => {
-    const p = wrap.dataset.pkg;
-    const img = wrap.querySelector('.app-icon');
-    if (img && !img.dataset.loaded) {
-      img.dataset.loaded = '1';
-      img.src = `ksu://icon/${p}`;
-      img.onerror = () => { img.src = `apatch://icon/${p}`; };
-    }
-  });
+  // Load icons using same pattern as other panels
+  if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-app-list');
 }
 
 function _toggleCacheSelect(pkg, row) {
@@ -10410,16 +10406,8 @@ function _renderCachePopupList() {
       </div>`;
   }).join('');
 
-  // Load icons
-  list.querySelectorAll('.app-icon-wrap[data-pkg]').forEach(wrap => {
-    const p = wrap.dataset.pkg;
-    const img = wrap.querySelector('.app-icon');
-    if (img && !img.dataset.loaded) {
-      img.dataset.loaded = '1';
-      img.src = `ksu://icon/${p}`;
-      img.onerror = () => { img.src = `apatch://icon/${p}`; };
-    }
-  });
+  // Load icons using same pattern as other panels
+  if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
 }
 
 async function _toggleCacheClearApp(pkg) {
