@@ -67,7 +67,7 @@ is_required() {
 }
 
 download() {
-    "$BB" wget -q --timeout=15 --tries=3 -O "$2" "$1" 2>/dev/null
+    "$BB" wget -q --timeout=15 -O "$2" "$1" 2>/dev/null
 }
 
 # ── HEADER ───────────────────────────────────────────────────
