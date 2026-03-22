@@ -2543,7 +2543,20 @@ async function openPopup(pkg, gearElement, isGame = false) {
     cacheBtn.classList.toggle('gaming-toggle-btn--on', cacheOnDisk);
     if (cacheLabel) cacheLabel.textContent = cacheOnDisk ? 'ON' : 'OFF';
     if (cacheBtn._cacheHandler) cacheBtn.removeEventListener('click', cacheBtn._cacheHandler);
-    cacheBtn._cacheHandler = () => _openCacheClearPopup(pkg);
+    cacheBtn._cacheHandler = async () => {
+      const cur = cacheBtn.getAttribute('aria-pressed') === 'true';
+      const next = !cur;
+      cacheBtn.setAttribute('aria-pressed', String(next));
+      cacheBtn.classList.toggle('gaming-toggle-btn--on', next);
+      if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
+      if (next) {
+        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
+        // Open sub-popup to select apps
+        _openCacheClearPopup(pkg);
+      } else {
+        await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear ${RR_DIR}/${pkg}.cacheclear_list`);
+      }
+    };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
 

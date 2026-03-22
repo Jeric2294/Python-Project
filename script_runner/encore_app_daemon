@@ -30,6 +30,7 @@ NORMAL_CPUSET="$MODDIR/DAVION_ENGINE/AI_MODE/normal_mode/normal_cpuset"
 # State tracking
 _active_pkg=""
 _vol_last_fg_pkg=""
+_was_bg=""       # tracks if active game went to background
 _active_mode=""   # "gaming" | "lite" | ""
 _dnd_active=0
 
@@ -229,6 +230,7 @@ restore_saturation() {
 # Tracks the pkg whose screen timeout is currently overriding the universal.
 _screentimeout_active_pkg=""
 _vol_last_fg_pkg=""
+_was_bg=""       # tracks if active game went to background
 _st_last_fg_pkg=""   # dedicated fg tracker — fires only on real app change
 
 # ── Per-app Connection on Launch ──────────────────────────────
@@ -254,6 +256,7 @@ restore_screentimeout() {
     [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
     _screentimeout_active_pkg=""
 _vol_last_fg_pkg=""
+_was_bg=""       # tracks if active game went to background
     # Restore to universal lock if set, else system default (30s)
     if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
         local ums
@@ -409,6 +412,7 @@ deactivate_tweaks() {
 
     _active_pkg=""
 _vol_last_fg_pkg=""
+_was_bg=""       # tracks if active game went to background
     _active_mode=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"
@@ -477,6 +481,26 @@ while true; do
         # Apply conn for new foreground app (skips if wifi/data already on)
         [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.conn" ] && \
             apply_per_app_conn "$current_pkg"
+    fi
+
+    # ── Detect if active game went to background ─────────────
+    if [ -n "$_active_pkg" ] && [ "$current_pkg" != "$_active_pkg" ]; then
+        # Game went to background — mark it
+        _was_bg="$_active_pkg"
+    fi
+
+    # ── Game returned from background → re-apply tweaks ──────
+    if [ -n "$_was_bg" ] && [ "$current_pkg" = "$_was_bg" ]; then
+        log_msg "[ENCORE-DAEMON] Game returned from bg: $current_pkg — re-applying tweaks"
+        local_lite=$(get_lite_mode "$current_pkg")
+        global_lite=$(get_global_enforce_lite)
+        [ "$global_lite" = "true" ] && local_lite="true"
+        dnd_val=$(get_enable_dnd "$current_pkg")
+        deactivate_tweaks "$current_pkg"
+        activate_tweaks "$current_pkg" "$local_lite" "$dnd_val"
+        _was_bg=""
+        sleep 1
+        continue
     fi
 
     # Nothing changed
