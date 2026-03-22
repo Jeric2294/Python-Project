@@ -67,7 +67,7 @@ is_required() {
 }
 
 download() {
-    "$BB" wget -q --timeout=15 -O "$2" "$1" 2>/dev/null
+    /data/adb/modules/GovThermal/busybox wget -q --timeout=15 -O "$2" "$1" 2>/dev/null
 }
 
 # ── HEADER ───────────────────────────────────────────────────
