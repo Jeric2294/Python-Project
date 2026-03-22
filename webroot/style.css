@@ -1764,7 +1764,7 @@ details[open] #popup-idle60-delay-opts button:nth-child(5) { animation-delay: 0.
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 0 0;
+  margin: 8px 0 6px;
   padding: 8px 12px;
   background: rgba(var(--a-rgb), 0.04);
   border: 0.4px solid rgba(var(--a-rgb), 0.22);
