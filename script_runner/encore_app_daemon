@@ -29,6 +29,7 @@ NORMAL_CPUSET="$MODDIR/DAVION_ENGINE/AI_MODE/normal_mode/normal_cpuset"
 
 # State tracking
 _active_pkg=""
+_vol_last_fg_pkg=""
 _active_mode=""   # "gaming" | "lite" | ""
 _dnd_active=0
 
@@ -227,6 +228,7 @@ restore_saturation() {
 # ── Per-app screen off timeout ────────────────────────────────
 # Tracks the pkg whose screen timeout is currently overriding the universal.
 _screentimeout_active_pkg=""
+_vol_last_fg_pkg=""
 _st_last_fg_pkg=""   # dedicated fg tracker — fires only on real app change
 
 # ── Per-app Connection on Launch ──────────────────────────────
@@ -251,6 +253,7 @@ apply_per_app_screentimeout() {
 restore_screentimeout() {
     [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
     _screentimeout_active_pkg=""
+_vol_last_fg_pkg=""
     # Restore to universal lock if set, else system default (30s)
     if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
         local ums
@@ -405,6 +408,7 @@ deactivate_tweaks() {
     disable_dnd
 
     _active_pkg=""
+_vol_last_fg_pkg=""
     _active_mode=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"
@@ -458,6 +462,20 @@ while true; do
             elif [ -n "$_screentimeout_active_pkg" ]; then
                 restore_screentimeout
             fi
+        fi
+    fi
+
+    # ── Per-app Volume — fires for ALL apps on foreground change ────
+    if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
+        _prev_vol_pkg="$_vol_last_fg_pkg"
+        _vol_last_fg_pkg="$current_pkg"
+        # Restore volume for app that left focus (only if it had per-app vol)
+        if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
+            restore_volume
+        fi
+        # Apply per-app volume for new foreground app
+        if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
+            apply_per_app_volume "$current_pkg"
         fi
     fi
 
