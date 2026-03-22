@@ -159,7 +159,7 @@ async function detectDeviceLimits() {
       `cat /sys/class/leds/lcd-bl/max_brightness 2>/dev/null || ` +
       `settings get system screen_brightness_max_value 2>/dev/null || echo ""`
     ),
-    exec(`cmd media_session volume --stream 3 --get 2>/dev/null`)
+    exec(`cmd media_session volume --stream 3 --get 2>/dev/null; true`)
   ]);
 
   // ── Brightness ───────────────────────────────────────────
@@ -1988,7 +1988,7 @@ function renderUnivVolState() {
 async function setUniversalVolume(val) {
   universalVolume = val;
   renderUnivVolState();
-  await exec(`cmd media_session volume --stream 3 --set ${val} 2>/dev/null || media volume --stream 3 --set ${val} 2>/dev/null`);
+  await exec(`cmd media_session volume --stream 3 --set ${val} 2>/dev/null; true`);
   await exec(`mkdir -p /sdcard/DAVION_ENGINE && echo "${val}" > ${UNIVERSAL_VOL_FILE}`);
   setStatus(`🔊 Volume locked: ${val}`);
   showToast(`Volume locked at ${val}`, 'ENGINE', 'success', '🔊');
@@ -2046,7 +2046,7 @@ function initUniversalVolume() {
     if (activeEl) { activeEl.textContent = v + ' / ' + (DEVICE_MAX_VOLUME || 15); activeEl.className = 'rr-status-val on'; }
     clearTimeout(_univVolDebounce);
     _univVolDebounce = setTimeout(() => {
-      exec(`cmd media_session volume --stream 3 --set ${v} 2>/dev/null || media volume --stream 3 --set ${v} 2>/dev/null`);
+      exec(`cmd media_session volume --stream 3 --set ${v} 2>/dev/null; true`);
     }, 60);
   }
 
@@ -2394,6 +2394,10 @@ async function openPopup(pkg, gearElement, isGame = false) {
   }
 
 
+  // Store initial cache state for nothingChanged check
+  const _cacheInitRaw = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim();
+  if (!_popupInitial) window._popupInitial = {};
+
   _killothersBl       = new Set();
   _killothersBlPkgs   = [];
   _killothersBlQuery  = '';
@@ -2613,6 +2617,7 @@ async function openPopup(pkg, gearElement, isGame = false) {
     globalEnforceLite,
     ko_on:           koOnDisk,
     conn:            connOnDisk,
+    cache_on:        (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1',
     spare60:         _popupSpare60On,
     hvol_on:         _popupHvolOn,
     hvol_val:        _popupHvolVal,
@@ -2693,6 +2698,7 @@ async function applyRefreshLock() {
   const curDnd      = dndCbCheck?.checked  || false;
   const curKoOn      = koBtnCheck?.getAttribute('aria-pressed') === 'true';
   const curConn      = _popupConnType;
+  const curCacheOn   = document.getElementById('popup-cache-btn')?.getAttribute('aria-pressed') === 'true';
   const nothingChanged = (
     modeId   === _popupInitial.mode   &&
     curBright === _popupInitial.bright &&
@@ -2704,6 +2710,7 @@ async function applyRefreshLock() {
     curDnd    === _popupInitial.enable_dnd &&
     curKoOn      === _popupInitial.ko_on &&
     curConn      === _popupInitial.conn &&
+    curCacheOn   === _popupInitial.cache_on &&
     (document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true') === _popupInitial.spare60 &&
     (document.getElementById('popup-hvol-toggle')?.getAttribute('aria-pressed') === 'true') === _popupInitial.hvol_on &&
     (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val &&
@@ -2760,7 +2767,7 @@ async function applyRefreshLock() {
   if (vv >= 0) {
     await exec(`mkdir -p ${RR_DIR} && echo '${vv}' > ${RR_DIR}/${currentPkg}.vol`);
     // Apply now immediately
-    await exec(`cmd media_session volume --stream 3 --set ${vv} 2>/dev/null || media volume --stream 3 --set ${vv} 2>/dev/null`);
+    await exec(`cmd media_session volume --stream 3 --set ${vv} 2>/dev/null; true`);
     // Signal volume daemon to re-apply
     await exec(`echo "${currentPkg}" > /dev/.davion_vol_retrigger 2>/dev/null`);
   } else {
@@ -2768,7 +2775,7 @@ async function applyRefreshLock() {
     // Restore universal volume or do nothing
     const uvRaw = (await exec(`cat ${UNIVERSAL_VOL_FILE} 2>/dev/null`)).trim();
     if (uvRaw !== '' && !isNaN(parseInt(uvRaw))) {
-      await exec(`cmd media_session volume --stream 3 --set ${uvRaw} 2>/dev/null || media volume --stream 3 --set ${uvRaw} 2>/dev/null`);
+      await exec(`cmd media_session volume --stream 3 --set ${uvRaw} 2>/dev/null; true`);
     }
   }
 
@@ -2841,6 +2848,14 @@ async function applyRefreshLock() {
     configuredPkgs.add(currentPkg);
   } else {
     await exec(`rm -f ${RR_DIR}/${currentPkg}.conn`);
+  }
+
+  // ── Save Cache Clear On Launch state ─────────────────────────
+  if (curCacheOn) {
+    await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
+    configuredPkgs.add(currentPkg);
+  } else {
+    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear ${RR_DIR}/${currentPkg}.cacheclear_list`);
   }
 
   // Badge: all per-app settings (conn + kill state read from disk)
@@ -3196,7 +3211,7 @@ async function saveAllConfig(){
   const prof=activeProfile||'balanced';
   const universalLine      = rrActive ? `service call SurfaceFlinger 1035 i32 ${rrActive} >/dev/null 2>&1` : '# no universal RR';
   const universalVolLine = universalVolume !== null
-    ? `cmd media_session volume --stream 3 --set ${universalVolume} 2>/dev/null || media volume --stream 3 --set ${universalVolume} 2>/dev/null`
+    ? `cmd media_session volume --stream 3 --set ${universalVolume} 2>/dev/null; true`
     : '# no universal volume lock';
 
   const universalBrightLine = universalBrightness !== null
@@ -5472,7 +5487,7 @@ async function _applyHeadsetVolNow() {
   }
   // Apply headset volume only if the toggle is ON
   if (!_headsetVolOn) return;
-  await exec(`cmd media_session volume --stream 3 --set ${_headsetVolVal} 2>/dev/null || media volume --stream 3 --set ${_headsetVolVal} 2>/dev/null`);
+  await exec(`cmd media_session volume --stream 3 --set ${_headsetVolVal} 2>/dev/null; true`);
 }
 
 // Restore volume to speaker baseline on headset unplug.
@@ -5481,7 +5496,7 @@ async function _restorePreHeadsetVol() {
   const restoreVal = universalVolume ?? _preHeadsetVolSnapshot;
   _preHeadsetVolSnapshot = null; // clear so next plug-in re-snapshots fresh
   if (restoreVal === null) return;
-  await exec(`cmd media_session volume --stream 3 --set ${restoreVal} 2>/dev/null || media volume --stream 3 --set ${restoreVal} 2>/dev/null`);
+  await exec(`cmd media_session volume --stream 3 --set ${restoreVal} 2>/dev/null; true`);
 }
 
 function initHeadsetConfig() {

@@ -171,8 +171,7 @@ apply_per_app_volume() {
         local vv
         vv=$(tr -d '[:space:]' < "$vol_file")
         if [ -n "$vv" ] && [ "$vv" -ge 0 ] 2>/dev/null; then
-            cmd media_session volume --stream 3 --set "$vv" 2>/dev/null || \
-            media volume --stream 3 --set "$vv" 2>/dev/null
+            cmd media_session volume --stream 3 --set "$vv" 2>/dev/null; true
             log_msg "  Volume locked: $vv for $pkg"
         fi
     fi
@@ -184,8 +183,7 @@ restore_volume() {
         local uv
         uv=$(tr -d '[:space:]' < "$UNIVERSAL_VOL_FILE")
         [ -n "$uv" ] && [ "$uv" -ge 0 ] 2>/dev/null && \
-            cmd media_session volume --stream 3 --set "$uv" 2>/dev/null || \
-            media volume --stream 3 --set "$uv" 2>/dev/null
+            cmd media_session volume --stream 3 --set "$uv" 2>/dev/null; true
     fi
 }
 
