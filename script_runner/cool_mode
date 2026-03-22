@@ -1,7 +1,8 @@
 #!/system/bin/sh
 # =============================================================================
 #  COOL MODE — Targeted heat reduction for DAVION ENGINE
-#  3 strategies: GPU Power Tuning + EEM Extended + Schedutil Fine-Tuning
+#  6 strategies: GPU Power Tuning + EEM Extended + Schedutil
+#                + DRAM OPP floor + GPU DCS + CPU Idle MCDI
 #
 #  Usage: cool_mode enable | disable
 #
@@ -102,15 +103,80 @@ tune_schedutil() {
     log_msg "Schedutil: $([ "$enable" = "1" ] && echo 'cool tuning' || echo 'defaults restored')"
 }
 
+# ── 4. DRAM/DVFSRC OPP Floor ─────────────────────────────────
+tune_dram_opp() {
+    local enable="$1"
+    # Confirmed paths from de_cpu_engine (MT6855 / Dimensity 6080):
+    # dvfsrc_req_ddr_opp lives under helio-dvfsrc subdir
+    # dvfsrc_force_vcore_dvfs_opp lives under /sys/kernel/helio-dvfsrc/
+    local found=0
+    for base in         "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc"         "/sys/devices/platform/10042000.dvfsrc/helio-dvfsrc"         "/sys/devices/platform/1c00f000.dvfsrc/mtk-dvfsrc-devfreq/devfreq/mtk-dvfsrc-devfreq"; do
+        if [ -d "$base" ]; then
+            found=1
+            if [ "$enable" = "1" ]; then
+                # Allow lowest DRAM OPP — no forced floor
+                de_write 0  "$base/dvfsrc_req_ddr_opp"
+                de_write 0  /sys/kernel/helio-dvfsrc/dvfsrc_force_vcore_dvfs_opp
+                log_msg "DRAM: OPP floor released via $base"
+            else
+                # Restore default — -1 = kernel managed (confirmed in de_cpu_engine balance)
+                de_write -1 "$base/dvfsrc_req_ddr_opp"
+                de_write -1 /sys/kernel/helio-dvfsrc/dvfsrc_force_vcore_dvfs_opp
+                log_msg "DRAM: OPP restored to kernel-managed (-1)"
+            fi
+            break
+        fi
+    done
+    [ "$found" = "0" ] && log_msg "DRAM: dvfsrc node not found — skipping"
+}
+
+# ── 5. GPU DCS (Dynamic Core Scaling) ────────────────────────
+tune_gpu_dcs() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Enable DCS — kernel manages active shader cores dynamically
+        # Default behavior, more efficient than always-on (Pyrox disables this)
+        de_write 1 /sys/kernel/ged/hal/dcs_mode
+        log_msg "GPU DCS: enabled (dynamic core scaling)"
+    else
+        # Restore GED default (1 = enabled)
+        de_write 1 /sys/kernel/ged/hal/dcs_mode
+        log_msg "GPU DCS: restored to default"
+    fi
+}
+
+# ── 6. CPU Idle MCDI (Multi-Core Deep Idle) ──────────────────
+tune_mcdi() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Enable deeper idle — CPU cores sleep deeper between workloads
+        de_write 1 /sys/power/mcdi_enable
+        de_write 1 /sys/devices/system/cpu/cpuidle/cpuidle_sysfs_switch
+        # Enable all CPU idle states (write 0 = enabled/not-disabled)
+        for state in /sys/devices/system/cpu/cpu*/cpuidle/state*/disable; do
+            de_write 0 "$state"
+        done
+        log_msg "MCDI: deep idle enabled"
+    else
+        # Restore defaults — both nodes default to 1 (enabled)
+        de_write 1 /sys/power/mcdi_enable
+        de_write 1 /sys/devices/system/cpu/cpuidle/cpuidle_sysfs_switch
+        log_msg "MCDI: restored to default"
+    fi
+}
+
 # ── Enable Cool Mode ──────────────────────────────────────────
 enable_cool() {
     log_msg "Enabling Cool Mode..."
     tune_gpu_power 1
     tune_eem_gpu -8
     tune_schedutil 1
+    tune_dram_opp 1
+    tune_gpu_dcs 1
+    tune_mcdi 1
     mkdir -p "$CFG_DIR"
     echo "enabled" > "$COOL_STATE"
-    log_msg "Cool Mode ENABLED ✓"
+    log_msg "Cool Mode ENABLED ✓ (6 optimizations active)"
 }
 
 # ── Disable Cool Mode ─────────────────────────────────────────
@@ -119,6 +185,9 @@ disable_cool() {
     tune_gpu_power 0
     tune_eem_gpu 0
     tune_schedutil 0
+    tune_dram_opp 0
+    tune_gpu_dcs 0
+    tune_mcdi 0
     mkdir -p "$CFG_DIR"
     echo "disabled" > "$COOL_STATE"
     log_msg "Cool Mode DISABLED ✓"
