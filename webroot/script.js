@@ -258,7 +258,8 @@ function initFabSettings(){
   const fabBtn    = document.getElementById("fab-settings-btn");
   const fabMenu   = document.getElementById("fab-menu");
   const fabBubble = document.getElementById("fab-theme-bubble");
-  const menuTheme = document.getElementById("fab-menu-theme");
+  const menuTheme   = document.getElementById("fab-menu-theme");
+  const menuBrowser = document.getElementById("fab-menu-browser");
   const menuExit  = document.getElementById("fab-menu-exit");
   if(!fabBtn) return;
 
@@ -292,6 +293,20 @@ function initFabSettings(){
     menuOpen = false;
     fabMenu.classList.remove("fab-menu--open");
     fabMenu.setAttribute("aria-hidden","true");
+  });
+
+  menuBrowser?.addEventListener("click", async e=>{
+    e.stopPropagation();
+    closeAll();
+    const url = "http://127.0.0.1:8080";
+    if (_BROWSER_MODE) {
+      // Already in browser — just open a new tab
+      window.open(url, "_blank");
+    } else {
+      // Inside KSU/APatch WebView — use am start to open in default browser
+      await exec(`am start -a android.intent.action.VIEW -d "${url}" 2>/dev/null`);
+    }
+    showToast('Opening WebUI in browser…', 'BROWSER', 'info', '🌐');
   });
 
   menuExit.addEventListener("click", async e=>{
