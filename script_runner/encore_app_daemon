@@ -142,38 +142,29 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
     fi
 }
 # ── Clear selected app caches on launch ──────────────────────────────────
-# Flag:  RR_DIR/pkg.cacheclear             (trigger enabled/disabled)
-# List:  /sdcard/DAVION_ENGINE/cache_selected.txt  (from Panel 12 selection)
+# File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
+# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
 #
-# Clears only the apps checked in Panel 12 (Clear App Cache).
-# Same list that the CLEAR SELECTED button in that panel uses.
+# Clears only the apps that are checked/selected in the Cache Manager panel.
+# Same list that CLEAR SELECTED button in the panel uses.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
 
     local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
 
-    # Build target list — from Panel 12 selection if file exists and non-empty,
-    # otherwise fall back to ALL third-party apps so clearing always does something.
-    local targets=""
-    if [ -f "$SELECTED_FILE" ] && [ -s "$SELECTED_FILE" ]; then
-        targets=$(cat "$SELECTED_FILE" 2>/dev/null | tr -d '\r' | grep -v '^\s*$')
-        log_msg "Cache Clear: using Panel 12 selection for $pkg"
-    else
-        targets=$(pm list packages -3 2>/dev/null | cut -d: -f2)
-        log_msg "Cache Clear: no Panel 12 selection — falling back to all user apps for $pkg"
-    fi
-
-    [ -z "$targets" ] && {
-        log_msg "Cache Clear: target list empty — skipping for $pkg"
+    # No selection = nothing to clear
+    [ -f "$SELECTED_FILE" ] || {
+        log_msg "Cache Clear: no selection file — skipping for $pkg"
         return
     }
 
     local cleared=0
     local skipped=0
-    local target did_clear seen_real real_dir cache_dir
+    local target total_kb did_clear seen_real real_dir kb cache_dir
 
-    for target in $targets; do
+    while IFS= read -r target; do
+        # Strip CRLF from WebUI-written file
         target=$(printf '%s' "$target" | tr -d '\r')
         { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
 
@@ -189,6 +180,7 @@ clear_cache_for_pkg() {
             com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
         esac
 
+        total_kb=0
         did_clear=0
         seen_real=""
 
@@ -197,23 +189,24 @@ clear_cache_for_pkg() {
             "/data/user_de/0/$target/cache" \
             "/data/data/$target/cache"; do
             [ -d "$cache_dir" ] || continue
-            # Dedup symlinked paths
             real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
             case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
             seen_real="${seen_real}|${real_dir}|"
-            # Always attempt rm-rf — removed unreliable du check
-            # rm -rf on an already-empty dir is a safe no-op
+            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
+            [ "${kb:-0}" = "0" ] && continue
             rm -rf "${cache_dir:?}/"* 2>/dev/null
+            total_kb=$(( total_kb + ${kb:-0} ))
             did_clear=1
         done
 
         if [ "$did_clear" = "1" ]; then
             cleared=$((cleared + 1))
-            log_msg "  CacheClr: $target"
+            log_msg "  CacheClr: $target (~${total_kb}KB)"
         else
             skipped=$((skipped + 1))
         fi
-    done
+
+    done < "$SELECTED_FILE"
 
     local label
     label=$(get_app_label "$pkg")
@@ -565,15 +558,8 @@ activate_tweaks() {
     # ── Kill Others: force-stop other apps now ────────────────
     kill_others_for_pkg "$pkg" &
 
-    # ── Cache Clear (Encore games) — non-Encore handled by logcat watcher ─
-    # cache_global_enabled guard keeps this consistent with all other launch paths
-    if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-        if cache_global_enabled; then
-            clear_cache_for_pkg "$pkg" &
-        else
-            log_msg "  Cache(tweaks): skipped for $pkg — global toggle OFF"
-        fi
-    fi
+    # ── Cache Clear: clear all other user app caches if configured ───────────
+    [ -f "$RR_DIR/$pkg.cacheclear" ] && clear_cache_for_pkg "$pkg" &
 }
 
 # ── Deactivate tweaks and revert to normal ────────────────────
@@ -665,8 +651,8 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             fi
         fi
         # Cache Clear — fires if this app has cache clear enabled
-        # Encore games are handled inside activate_tweaks() below — skip here to avoid double execution
-        if [ -f "$RR_DIR/$pkg.cacheclear" ] && ! gamelist_has_pkg "$pkg"; then
+        # New behavior: clears ALL user app caches except spare list
+        if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
             if cache_global_enabled; then
                 clear_cache_for_pkg "$pkg"
                 log_msg "  Cache(lc): ran for $pkg"

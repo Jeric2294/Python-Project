@@ -2743,34 +2743,8 @@ async function openPopup(pkg, gearElement, isGame = false) {
       } else {
         await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear`);
       }
-      // Refresh Panel 12 count instantly on every toggle
-      const _sub  = document.getElementById('popup-cache-sub');
-      const _goto = document.getElementById('popup-cache-goto-p12');
-      if (_sub) {
-        const _raw  = await exec(`cat /sdcard/DAVION_ENGINE/cache_selected.txt 2>/dev/null`);
-        const _cnt  = _raw.trim().split('\n').filter(l => l.trim() && l.trim() !== '*').length;
-        _sub.textContent = _cnt > 0
-          ? `Will clear ${_cnt} app${_cnt !== 1 ? 's' : ''} selected in Panel 12 on launch`
-          : 'No apps selected in Panel 12 · tap → to configure';
-        if (_goto) _goto.style.display = '';
-      }
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
-  }
-
-  // ── Show Panel 12 selected-app count in sub-label ──
-  // Reads cache_selected.txt (the same list CLEAR SELECTED in Panel 12 uses).
-  {
-    const _cacheSub  = document.getElementById('popup-cache-sub');
-    const _cacheGoto = document.getElementById('popup-cache-goto-p12');
-    const _rawSel    = await exec(`cat /sdcard/DAVION_ENGINE/cache_selected.txt 2>/dev/null`);
-    const _selCount  = _rawSel.trim().split('\n').filter(l => l.trim() && l.trim() !== '*').length;
-    if (_cacheSub) {
-      _cacheSub.textContent = _selCount > 0
-        ? `Will clear ${_selCount} app${_selCount !== 1 ? 's' : ''} selected in Panel 12 on launch`
-        : 'No apps selected in Panel 12 · tap → to configure';
-    }
-    if (_cacheGoto) _cacheGoto.style.display = '';
   }
 
   // Load per-app spare from 60Hz drop state — uses dedicated .spare file, isolated from universal
@@ -10796,6 +10770,7 @@ async function _loadCacheApps() {
     _cacheApps = _cacheUserApps;
     _renderCacheList(_cacheApps);
     _updateClearBtn();
+    _updateSparedCount();
 
     // Load system apps in background
     exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 12000).then(rawSystem => {
@@ -10808,9 +10783,22 @@ async function _loadCacheApps() {
   }
 }
 
+function _updateSparedCount() {
+  const spared = [..._cacheUserApps, ..._cacheSystemApps].filter(p => !_cacheSelected.has(p)).length;
+  const el = document.getElementById('cache-panel-count-spared');
+  // Show count of user apps NOT selected (i.e., spared from clearing)
+  const userSpared = _cacheUserApps.filter(p => !_cacheSelected.has(p)).length;
+  if (el) el.textContent = userSpared;
+}
+
 function _switchCachePanelTab(tab) {
   _cachePanelTab = tab;
-  _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
+  if (tab === 'spared') {
+    // Spared = user apps NOT selected (won't be cleared)
+    _cacheApps = _cacheUserApps.filter(p => !_cacheSelected.has(p));
+  } else {
+    _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
+  }
   document.querySelectorAll('[data-cachetab2]').forEach(b => {
     const active = b.dataset.cachetab2 === tab;
     b.classList.toggle('app-tab--active', active);
@@ -10921,30 +10909,17 @@ async function _clearSelectedCache() {
   let cleared = 0, failed = 0;
 
   for (const pkg of _cacheSelected) {
-    // Check if any cache dir exists and has content, then clear
+    // rm cache contents across all paths — same as daemon
     const res = await exec(
-      `_did=0; ` +
-      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do ` +
-      `  [ -d "$d" ] || continue; ` +
-      `  rm -rf "$d/"* 2>/dev/null && _did=1; ` +
-      `done; ` +
-      `echo $_did`
+      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do` +
+      `  [ -d "$d" ] && rm -rf "$d/"* 2>/dev/null; done; echo OK`
     );
-    const trimmed = res.trim();
-    if (trimmed === '1') cleared++;
-    // trimmed === "0" means cache dirs exist but already empty — still count as cleared
-    // If res is empty (exec timeout/error), count as failed
-    else if (trimmed === '') failed++;
+    if (res.includes('OK')) cleared++; else failed++;
   }
 
   if (status) {
-    if (failed > 0) {
-      status.style.color = '#f59e0b';
-      status.textContent = `⚠ Cleared ${cleared} · Failed: ${failed}`;
-    } else {
-      status.style.color = 'var(--a)';
-      status.textContent = `✔ Cleared ${cleared} app(s)`;
-    }
+    status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
+    status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
   }
   if (cleared > 0) {
     showToast(
@@ -10953,21 +10928,217 @@ async function _clearSelectedCache() {
     );
   } else if (failed > 0) {
     showToast(`Failed to clear ${failed} app cache${failed !== 1 ? 's' : ''}`, 'CACHE', 'error', '🗑');
-  } else {
-    showToast('Caches already empty', 'CACHE', 'info', '🗑');
   }
 
-  // Selection stays on disk — daemon uses it on every launch.
-  // Re-render so UI reflects current state (checkmarks stay checked).
+  _cacheSelected.clear();
   _renderCacheList(_cacheApps);
   _updateClearBtn();
   if (btn) btn.disabled = false;
 }
 
 /* ═══════════════════════════════════════════════════════════
-   CACHE CLEAR ON LAUNCH — Game Config toggle
-   Flag:      RR_DIR/pkg.cacheclear        (enabled / disabled)
-   Clears:    /sdcard/DAVION_ENGINE/cache_selected.txt  (Panel 12 selection)
-   The daemon reads cache_selected.txt to know which apps to clear.
-   Selection is managed entirely in Panel 12 (Clear App Cache).
+   CACHE CLEAR ON LAUNCH — Per-app popup
+   NEW LOGIC: clear ALL user app caches on launch, except spared list.
+   File: RR_DIR/pkg.cacheclear        (flag — enabled/disabled)
+   File: RR_DIR/pkg.cacheclear_list   (spare list — apps to SKIP)
    ═══════════════════════════════════════════════════════════ */
+
+let _cacheClearPkg     = '';
+let _cacheClearOn      = false;
+let _cacheSpareList    = new Set();   // apps to SPARE (skip) from clearing
+let _cacheClearAllPkgs = [];          // user packages (system excluded)
+let _cacheClearTab     = 'all';
+let _cacheClearQuery   = '';
+
+async function _openCacheClearPopup(pkg) {
+  _cacheClearPkg = pkg;
+  const overlay = document.getElementById('cache-clear-popup');
+  const pkgEl   = document.getElementById('cache-popup-pkg');
+  if (!overlay) return;
+
+  if (pkgEl) pkgEl.textContent = pkg;
+
+  // Load enabled flag
+  const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
+  _cacheClearOn = flagRaw.trim() === '1';
+
+  // Load spare list (apps to SKIP — not clear)
+  const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
+  _cacheSpareList = new Set(cleanLines(listRaw));
+
+  // Sync toggle
+  const tog      = document.getElementById('cache-popup-toggle');
+  const togLabel = document.getElementById('cache-popup-toggle-label');
+  if (tog) {
+    tog.setAttribute('aria-pressed', String(_cacheClearOn));
+    tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
+    if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
+  }
+
+  // Load user app list fresh each time (system packages excluded).
+  // Do NOT filter out pkg here — filter at render time so switching apps always shows correct list.
+  const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
+  _cacheClearAllPkgs = cleanLines(rawUser);
+
+  _cacheClearTab   = 'all';
+  _cacheClearQuery = '';
+  _renderCachePopupList();
+  _updateCachePopupCount();
+
+  // Wire search
+  const searchEl = document.getElementById('cache-popup-search');
+  const clearEl  = document.getElementById('cache-popup-search-clear');
+  if (searchEl) {
+    searchEl.value = '';
+    searchEl.oninput = () => {
+      _cacheClearQuery = searchEl.value;
+      if (clearEl) clearEl.hidden = !_cacheClearQuery;
+      _renderCachePopupList();
+    };
+  }
+  if (clearEl) {
+    clearEl.hidden = true;
+    clearEl.onclick = () => {
+      if (searchEl) searchEl.value = '';
+      _cacheClearQuery = '';
+      clearEl.hidden = true;
+      _renderCachePopupList();
+    };
+  }
+
+  // Wire tabs (spared / all)
+  document.querySelectorAll('[data-cachetab]').forEach(btn => {
+    btn.onclick = () => {
+      _cacheClearTab = btn.dataset.cachetab;
+      document.querySelectorAll('[data-cachetab]').forEach(b => {
+        b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
+        b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
+      });
+      _renderCachePopupList();
+    };
+  });
+
+  // Wire toggle
+  if (tog) {
+    tog.onclick = async () => {
+      _cacheClearOn = !_cacheClearOn;
+      tog.setAttribute('aria-pressed', String(_cacheClearOn));
+      tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
+      if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
+      if (_cacheClearOn) {
+        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
+      } else {
+        await exec(`rm -f ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
+      }
+    };
+  }
+
+  // Wire close + done
+  document.getElementById('cache-popup-close')?.addEventListener('click', _closeCacheClearPopup);
+  document.getElementById('cache-popup-done')?.addEventListener('click', _closeCacheClearPopup);
+
+  overlay.style.display = 'flex';
+}
+
+function _closeCacheClearPopup() {
+  const overlay = document.getElementById('cache-clear-popup');
+  if (overlay) overlay.style.display = 'none';
+  const spared  = _cacheSpareList.size;
+  const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
+  if (_cacheClearOn) {
+    const msg = spared > 0
+      ? `Cache cleared on launch • ${spared} app${spared !== 1 ? 's' : ''} spared`
+      : 'Cache cleared on launch • all user apps';
+    showToast(msg, appName.toUpperCase(), 'success', '🗑');
+  } else {
+    showToast('Cache clear on launch disabled', appName.toUpperCase(), 'info', '🗑');
+  }
+}
+
+function _renderCachePopupList() {
+  const list = document.getElementById('cache-popup-list');
+  if (!list) return;
+
+  // spared tab: show only spared apps; all tab: show all user apps
+  // Always exclude the launching app itself — it's permanently spared
+  let pool = (_cacheClearTab === 'spared'
+    ? _cacheClearAllPkgs.filter(p => _cacheSpareList.has(p))
+    : _cacheClearAllPkgs
+  ).filter(p => p && p !== _cacheClearPkg);
+
+  if (_cacheClearQuery) {
+    const q = _cacheClearQuery.toLowerCase();
+    pool = pool.filter(p => p.toLowerCase().includes(q) ||
+      (typeof getAppLabel === 'function' && getAppLabel(p).toLowerCase().includes(q)));
+  }
+
+  _updateCachePopupCount();
+
+  if (!pool.length) {
+    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">${
+      _cacheClearTab === 'spared' ? 'No apps spared' : 'No apps'
+    }</div>`;
+    return;
+  }
+
+  list.innerHTML = pool.map(p => {
+    const label  = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
+    const spared = _cacheSpareList.has(p);
+    // Spared = shield icon + highlighted; not spared = will be cleared (checkmark style)
+    return `
+      <div class="list-item" data-pkg="${p}" onclick="_toggleCacheSpareApp('${p}')">
+        <div class="item-row">
+          <div class="app-icon-wrap" data-pkg="${p}">
+            <img class="app-icon" alt="${label.toUpperCase()}">
+          </div>
+          <div class="item-info">
+            <span class="item-title">${label.toUpperCase()}</span>
+            <span class="item-desc mono">${p}</span>
+          </div>
+        </div>
+        <div class="btn-row">
+          <div id="cachepop-chk-${p.replace(/\./g,'_')}"
+            style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
+            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
+}
+
+async function _toggleCacheSpareApp(pkg) {
+  if (_cacheSpareList.has(pkg)) {
+    _cacheSpareList.delete(pkg);
+  } else {
+    _cacheSpareList.add(pkg);
+  }
+
+  // Save spare list to disk — shell reads this to skip these apps
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheSpareList]));
+
+  // Update checkbox
+  const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');
+  const chk    = document.getElementById(safeId);
+  const spared = _cacheSpareList.has(pkg);
+  if (chk) {
+    chk.style.background = spared ? 'var(--a)' : 'transparent';
+    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
+  }
+  _updateCachePopupCount();
+}
+
+function _updateCachePopupCount() {
+  const spared  = _cacheSpareList.size;
+  const total   = _cacheClearAllPkgs.filter(p => p !== _cacheClearPkg).length;
+  const sprdTab = document.getElementById('cache-popup-count-spared');
+  const allTab  = document.getElementById('cache-popup-count-all');
+  const main    = document.getElementById('cache-popup-count');
+  if (sprdTab) sprdTab.textContent = spared;
+  if (allTab)  allTab.textContent  = total;
+  if (main)    main.textContent    = spared > 0
+    ? `${spared} app${spared !== 1 ? 's' : ''} spared`
+    : 'all user apps will be cleared';
+}
