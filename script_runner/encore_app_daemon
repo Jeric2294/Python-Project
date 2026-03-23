@@ -590,16 +590,7 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             android|com.android.systemui|com.android.phone|com.android.shell|com.topjohnwu.magisk|com.transsion.hilauncher|com.android.launcher*) continue ;;
         esac
         echo "$pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
-        # Volume
-        _vf="$RR_DIR/$pkg.vol"
-        if [ -f "$_vf" ]; then
-            _vv=$(tr -d '[:space:]' < "$_vf")
-                if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null && [ "$_vv" -le 100 ] 2>/dev/null; then
-                    media volume --stream 3 --set "$_vv" 2>/dev/null || settings put system volume_music "$_vv" 2>/dev/null
-                    cmd media_session volume --stream 3 --set "$_vv" >/dev/null 2>&1; true
-                    log_msg "  Vol(lc): $_vv for $pkg"
-                fi
-        fi
+        # Volume handled by encore_app_daemon main loop to avoid conflicts
         # Brightness
         _bf="$RR_DIR/$pkg.bright"
         if [ -f "$_bf" ]; then
@@ -790,13 +781,19 @@ while true; do
 
     # ── Per-app Volume — apply AFTER deactivate/activate to avoid override ──
     if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
+        _prev_vol_pkg="$_vol_last_fg_pkg"
         _vol_last_fg_pkg="$current_pkg"
+        
         if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
             # Small delay — let app acquire audio focus before forcing volume
             (sleep 0.5 && apply_per_app_volume "$current_pkg") &
-        elif [ -f "$UNIVERSAL_VOL_FILE" ]; then
-            # No per-app vol for this app — restore universal volume
-            restore_volume
+        else
+            # No per-app vol for this app — check if we should restore universal
+            # We restore if the PREVIOUS app had a per-app volume applied
+            if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
+                restore_volume
+                log_msg "  Volume restored to universal (leaving $_prev_vol_pkg)"
+            fi
         fi
     fi
 

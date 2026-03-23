@@ -1059,21 +1059,8 @@ process_log_line() {
                 fi
 
                 # --- 5c. PER-APP VOLUME ---
-                VOL_FILE="$REFRESH_LOCK_DIR/${PKG}.vol"
-                UNIVERSAL_VOL_FILE="$EXTERNAL_CFG/universal_vol.txt"
-                if [ -f "$VOL_FILE" ]; then
-                    VOL_VAL=$(tr -d '\r\n\t ' < "$VOL_FILE")
-                    if [ -n "$VOL_VAL" ] && [ "$VOL_VAL" -ge 0 ] 2>/dev/null && [ "$VOL_VAL" -le 100 ] 2>/dev/null; then
-                        apply_volume "$VOL_VAL"
-                        log_msg "🔊 Volume: $VOL_VAL → $PKG"
-                    fi
-                elif [ -f "$UNIVERSAL_VOL_FILE" ]; then
-                    UV=$(tr -d '\r\n\t ' < "$UNIVERSAL_VOL_FILE")
-                    if [ -n "$UV" ] && [ "$UV" -ge 0 ] 2>/dev/null && [ "$UV" -le 100 ] 2>/dev/null; then
-                        apply_volume "$UV"
-                        log_msg "🔊 Universal volume restored: $UV"
-                    fi
-                fi
+                # Handled by encore_app_daemon to avoid conflicts
+                # log_msg "🔊 Volume logic skipped in logcat (handled by encore_app_daemon)"
 
                 # --- 5c2. PER-APP SATURATION ---
                 SAT_FILE="$REFRESH_LOCK_DIR/${PKG}.sat"
