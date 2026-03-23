@@ -90,15 +90,20 @@ restore_rr() {
 }
 
 # ── getevent touch watcher (background) ──────────────────────
+# getevent -c 1 blocks until ONE input event fires, then exits.
+# Loop forever: any input event (touch, button, sensor) = user activity.
+# Rate-limit writes to once per second max to avoid hammering sdcard.
 echo "$(date +%s)" > "$TOUCH_FLAG"
 
 (
-    getevent -lq 2>/dev/null | while IFS= read -r line; do
-        case "$line" in
-            *ABS_MT_TRACKING_ID*|*BTN_TOUCH*|*ABS_MT_POSITION_X*|*ABS_MT_POSITION_Y*)
-                echo "$(date +%s)" > "$TOUCH_FLAG"
-                ;;
-        esac
+    _last_write=0
+    while true; do
+        getevent -c 1 >/dev/null 2>&1
+        _now=$(date +%s)
+        if [ $(( _now - _last_write )) -ge 1 ]; then
+            echo "$_now" > "$TOUCH_FLAG"
+            _last_write=$_now
+        fi
     done
 ) &
 _GE_PID=$!
@@ -107,6 +112,8 @@ log_msg "getevent watcher started (PID $_GE_PID)"
 # ── Cleanup on exit ───────────────────────────────────────────
 cleanup() {
     kill "$_GE_PID" 2>/dev/null
+    # Kill any child getevent processes too
+    pkill -f "getevent" 2>/dev/null
     log_msg "Daemon exiting"
     exit 0
 }
@@ -145,26 +152,14 @@ while true; do
     DELAY=$(tr -d '[:space:]' < "$IDLE60_DELAY_FILE" 2>/dev/null)
     [ -z "$DELAY" ] && DELAY=5
 
-    # ── Priority 2: Per-app spare ─────────────────────────────
-    CUR_PKG=$(get_foreground_pkg)
-    if is_app_spared "$CUR_PKG"; then
-        if [ "$DROPPED" = "1" ] && [ "$_last_restore_reason" != "app_spare" ]; then
-            restore_rr
-            DROPPED=0
-            _last_restore_reason="app_spare"
-            log_msg "App $CUR_PKG is spared — restored from 60Hz drop"
-        fi
-        sleep 2
-        continue
-    fi
-
     # ── Compute idle time ──────────────────────────────────────
+    CUR_PKG=$(get_foreground_pkg)
     LAST=$(tr -d '[:space:]' < "$TOUCH_FLAG" 2>/dev/null)
     NOW=$(date +%s)
     [ -z "$LAST" ] && LAST="$NOW"
     IDLE=$((NOW - LAST))
 
-    # Per-app delay override
+    # Per-app delay override (custom delay per app still works)
     EFF_DELAY=$(get_app_delay "$CUR_PKG" "$DELAY")
 
     if [ "$IDLE" -ge "$EFF_DELAY" ] && [ "$DROPPED" = "0" ]; then
