@@ -379,6 +379,24 @@ function initFabSettings(){
     _koGlobalEnabled = !_koGlobalEnabled;
     _syncKoMenuItem(_koGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_koGlobalEnabled ? '1' : '0'}' > ${KO_GLOBAL_CFG_FILE}`);
+    if (!_koGlobalEnabled) {
+      // Delete .killothers files for non-game apps only
+      await exec(
+        `GL="${CFG_DIR}/gl_pkgs"; ` +
+        `for f in ${RR_DIR}/*.killothers; do ` +
+        `  [ -f "$f" ] || continue; ` +
+        `  pkg=$(basename "$f" .killothers); ` +
+        `  if [ -f "$GL" ] && grep -qFx "$pkg" "$GL" 2>/dev/null; then continue; fi; ` +
+        `  rm -f "$f" "${RR_DIR}/\${pkg}.killothers_bl" 2>/dev/null; ` +
+        `done`
+      );
+      // Clear in-memory KO state for non-game apps
+      Object.keys(_koState).forEach(pkg => {
+        if (!_isGame(pkg)) {
+          _koState[pkg] = { on: false, bl: new Set() };
+        }
+      });
+    }
     showToast(
       _koGlobalEnabled ? 'Kill Others on Launch enabled' : 'Kill Others on Launch disabled',
       'KILL OTHERS',
@@ -393,6 +411,18 @@ function initFabSettings(){
     _cacheGlobalEnabled = !_cacheGlobalEnabled;
     _syncCacheMenuItem(_cacheGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
+    if (!_cacheGlobalEnabled) {
+      // Delete .cacheclear files for non-game apps only
+      await exec(
+        `GL="${CFG_DIR}/gl_pkgs"; ` +
+        `for f in ${RR_DIR}/*.cacheclear; do ` +
+        `  [ -f "$f" ] || continue; ` +
+        `  pkg=$(basename "$f" .cacheclear); ` +
+        `  if [ -f "$GL" ] && grep -qFx "$pkg" "$GL" 2>/dev/null; then continue; fi; ` +
+        `  rm -f "$f" "${RR_DIR}/\${pkg}.cacheclear_list" 2>/dev/null; ` +
+        `done`
+      );
+    }
     showToast(
       _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
       'CLEAR CACHE',
@@ -1294,6 +1324,7 @@ function initUniversalBrightness() {
    § 10  Per-App list
    ═══════════════════════════════════════════════════════════ */
 let currentPkg = '';
+let _currentPopupIsGame = false;  // tracks whether current popup is Game or App config
 let _popupSpare60On = false;  // per-app spare from 60Hz drop state
 let _popupHvolOn   = false;   // per-app headset volume enabled
 let _popupHvolVal  = 7;       // per-app headset volume level (0-15)
@@ -2423,6 +2454,7 @@ function _updatePopupConnUI(type) {
 
 async function openPopup(pkg, gearElement, isGame = false) {
   currentPkg = pkg;
+  _currentPopupIsGame = isGame;
   const overlay = document.getElementById('floating-popup');
   const bubble = overlay.querySelector('.app-config-bubble');
   const pkgEl   = document.getElementById('popup-pkg-display');
@@ -2953,8 +2985,11 @@ async function applyRefreshLock() {
 
   // ── Save Kill Others state from popup ────────────────────────
   if (!_koState[currentPkg]) _koState[currentPkg] = { on: false, bl: new Set() };
-  _koState[currentPkg].on = curKoOn;
-  if (curKoOn) {
+  // Only save KO for games always; for apps only if global toggle is ON
+  const _koAllowed = _currentPopupIsGame || _koGlobalEnabled;
+  const _koSave = curKoOn && _koAllowed;
+  _koState[currentPkg].on = _koSave;
+  if (_koSave) {
     await exec(`mkdir -p ${RR_DIR} && echo '1' > ${RR_DIR}/${currentPkg}.killothers`);
     configuredPkgs.add(currentPkg);
   } else {
@@ -2971,7 +3006,9 @@ async function applyRefreshLock() {
   }
 
   // ── Save Cache Clear On Launch state ─────────────────────────
-  if (curCacheOn) {
+  const _cacheAllowed = _currentPopupIsGame || _cacheGlobalEnabled;
+  const _cacheSave = curCacheOn && _cacheAllowed;
+  if (_cacheSave) {
     await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
     configuredPkgs.add(currentPkg);
   } else {
@@ -2983,9 +3020,9 @@ async function applyRefreshLock() {
   const hasBright   = bv >= 0;
   const hasVol      = vv >= 0;
   const hasFd       = fdOn;
-  const hasKo       = curKoOn;
+  const hasKo       = _koSave;
   const hasConn     = !!curConn;
-  const hasCache    = curCacheOn;
+  const hasCache    = _cacheSave;
   const hasEncore   = encoreOn && encoreSaveResult?.ok;
   const hasSpare    = document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true';
   const hasAnything = hasMode || hasBright || hasVol || hasFd || hasKo || hasConn || hasCache || hasEncore || hasSpare;
@@ -3895,6 +3932,21 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initTheme();
   initFabSettings();
   _startStatusTicker();
+
+  // ── Android back button — close open panel instead of navigating away ──
+  history.pushState({ panelApp: true }, '');
+  window.addEventListener('popstate', e => {
+    const openDetails = document.querySelector('.nexus-panel .panel-details[open]');
+    if (openDetails) {
+      openDetails.removeAttribute('open');
+      _applyPanelFocus();
+      // Re-push state so back button works again for the next panel
+      history.pushState({ panelApp: true }, '');
+    } else {
+      // No panel open — let the back button work normally (exit WebView)
+      history.back();
+    }
+  });
   _initAllSliderFills();
 
   // Set --header-h so sticky panel summaries sit flush under the sticky header
@@ -6571,7 +6623,10 @@ function initGlobalSearch() {
 
     // Open the parent panel
     const details = section.querySelector('.panel-details');
-    if (open && details && !details.open) details.open = true;
+    if (open && details) {
+      if (!details.open) details.open = true;
+      _applyPanelFocus();
+    }
 
     // If a subpanel ID given, open it too
     // Works for both <details> subpanels and adv-details (conn-bubble) inside panels

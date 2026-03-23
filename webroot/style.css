@@ -692,6 +692,12 @@ details[open] > .adv-summary .adv-arrow-icon {
   margin-bottom: 4px;
   border-bottom: 0.4px solid var(--border);
 }
+/* Inside subpanels (adv-details), sticky tabs cause bleeding — use relative */
+.adv-details .panel-controls-sticky {
+  position: relative;
+  top: auto;
+  z-index: auto;
+}
 .panel-controls-sticky .search-wrap { margin-bottom: 5.8px; }
 .panel-controls-sticky .app-tab-bar { margin-bottom: 0; }
 .app-row {
