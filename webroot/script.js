@@ -2724,23 +2724,12 @@ async function openPopup(pkg, gearElement, isGame = false) {
   // ── Load Cache Clear On Launch state ──
   const cacheBtn   = document.getElementById('popup-cache-btn');
   const cacheLabel = document.getElementById('popup-cache-label');
-  const cacheSelectRow = document.getElementById('popup-cache-select-row');
   const cacheOnDisk = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1';
 
-  // Load per-app selection count for subtitle
-  const cacheListRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
-  const cacheListCount = cleanLines(cacheListRaw).length;
-  const cacheCountEl = document.getElementById('popup-cache-count');
-  if (cacheCountEl) cacheCountEl.textContent = cacheListCount;
   const cacheSubEl = document.getElementById('popup-cache-sub');
   if (cacheSubEl) {
-    cacheSubEl.textContent = cacheOnDisk && cacheListCount > 0
-      ? `Will clear ${cacheListCount} app cache${cacheListCount !== 1 ? 's' : ''} on launch`
-      : 'Clear other app caches when this app opens';
+    cacheSubEl.textContent = 'Auto-trigger cache clear from header button on launch';
   }
-
-  // Show/hide select button row
-  if (cacheSelectRow) cacheSelectRow.style.display = cacheOnDisk ? '' : 'none';
 
   if (cacheBtn) {
     cacheBtn.setAttribute('aria-pressed', String(cacheOnDisk));
@@ -2753,12 +2742,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
       cacheBtn.setAttribute('aria-pressed', String(next));
       cacheBtn.classList.toggle('gaming-toggle-btn--on', next);
       if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
-      if (cacheSelectRow) cacheSelectRow.style.display = next ? '' : 'none';
-      if (next) {
-        // Auto-open selection popup so user can pick apps
-        // .cacheclear flag is written only on APPLY — no pre-emptive disk write
-        _openCacheClearPopup(pkg);
-      }
       // UI-only toggle — actual save deferred to APPLY button
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
@@ -10771,6 +10754,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const tab = e.target.closest('[data-cachetab2]');
     if (tab) _switchCachePanelTab(tab.dataset.cachetab2);
   });
+
+  // ── Header circle clear-cache button ──────────────────────────────────
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (hb) {
+    hb.addEventListener('click', async () => {
+      await _headerClearCacheClick();
+    });
+    // Init state (dim if nothing selected yet)
+    _syncHeaderCacheBtn();
+  }
 });
 
 async function _loadCacheApps() {
@@ -10914,6 +10907,17 @@ function _selectAllCacheApps() {
 function _updateClearBtn() {
   const btn = document.getElementById('btn-clear-cache');
   if (btn) btn.textContent = `🗑 CLEAR (${_cacheSelected.size})`;
+  _syncHeaderCacheBtn();
+}
+
+function _syncHeaderCacheBtn() {
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (!hb) return;
+  const count = _cacheSelected.size;
+  hb.style.opacity = count > 0 ? '1' : '0.45';
+  hb.setAttribute('title', count > 0
+    ? `Clear cache \u2014 ${count} app${count !== 1 ? 's' : ''} selected`
+    : 'No apps selected \u2014 open Clear App Cache panel first');
 }
 
 function _filterCacheApps(query) {
@@ -11055,16 +11059,11 @@ function _closeCacheClearPopup() {
   );
 }
 
-// Sync the "→ SELECT APPS TO CLEAR (N)" button in the App Config popup
+// Sync the subtitle in the App Config popup (select-row removed — toggle only)
 function _syncPopupCacheCount() {
-  const countEl = document.getElementById('popup-cache-count');
-  if (countEl) countEl.textContent = _cacheClearList.size;
   const subEl = document.getElementById('popup-cache-sub');
   if (subEl) {
-    const n = _cacheClearList.size;
-    subEl.textContent = n > 0
-      ? `Will clear ${n} app cache${n !== 1 ? 's' : ''} on launch`
-      : 'Clear other app caches when this app opens';
+    subEl.textContent = 'Auto-trigger cache clear from header button on launch';
   }
 }
 
@@ -11167,3 +11166,66 @@ function _updateCachePopupCount() {
     ? `${selected} app${selected !== 1 ? 's' : ''} selected`
     : 'no apps selected';
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   HEADER CIRCLE CACHE-CLEAR BUTTON
+   Same logic as _clearSelectedCache() but triggered from the header.
+   Also used as the auto-trigger target when Clear Cache on Launch fires.
+   ═══════════════════════════════════════════════════════════════════ */
+
+async function _headerClearCacheClick() {
+  // If cache panel hasn't been loaded yet, load it first
+  if (!_cacheLoaded) await _loadCacheApps();
+
+  if (!_cacheSelected.size) {
+    showToast('No apps selected — open Clear App Cache panel to select apps', 'CACHE', 'info', '🗑');
+    return;
+  }
+
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (hb) {
+    hb.classList.add('hccb--clearing');
+    setTimeout(() => hb.classList.remove('hccb--clearing'), 700);
+  }
+
+  // Delegate to the shared clear function
+  await _clearSelectedCache();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   AUTO-CLICK: Clear Cache on Launch toggle hook
+   When an app with cache-clear-on-launch enabled is detected in the
+   logcat watcher in encore_app_daemon (shell side), it fires the
+   actual cache clearing. On the WebUI side, we also auto-click the
+   header circle button so the user gets visual feedback.
+
+   The daemon writes a trigger flag:
+     /dev/.davion_cache_clear_webui_trigger
+   We poll it and auto-click the circle when it appears.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const _CACHE_WEBUI_TRIGGER = '/dev/.davion_cache_clear_webui_trigger';
+let _cacheWebUiTriggerPoller = null;
+
+function _startCacheWebUiTriggerPoller() {
+  if (_cacheWebUiTriggerPoller) return;
+  _cacheWebUiTriggerPoller = setInterval(async () => {
+    const res = await exec(`[ -f ${_CACHE_WEBUI_TRIGGER} ] && cat ${_CACHE_WEBUI_TRIGGER} && rm -f ${_CACHE_WEBUI_TRIGGER} || echo ""`).catch(() => '');
+    const pkg = (res || '').trim();
+    if (!pkg) return;
+    // Auto-click the header clear button for visual feedback
+    const hb = document.getElementById('btn-header-clear-cache');
+    if (hb) {
+      hb.classList.add('hccb--clearing');
+      setTimeout(() => hb.classList.remove('hccb--clearing'), 700);
+    }
+    // Ensure cache apps are loaded then run the clear
+    if (!_cacheLoaded) await _loadCacheApps();
+    if (_cacheSelected.size > 0) {
+      await _clearSelectedCache();
+    }
+  }, 2000);
+}
+
+// Start the poller once DOM is ready
+document.addEventListener('DOMContentLoaded', _startCacheWebUiTriggerPoller);

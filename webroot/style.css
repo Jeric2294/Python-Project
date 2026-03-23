@@ -217,6 +217,35 @@ body::before {
 .header-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .header-controls { display: flex; gap: 5px; }
 
+/* Header circle cache-clear button */
+.header-cache-clear-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  background: var(--tint); border: 0.4px solid var(--bdr);
+  border-radius: 50%; color: var(--a);
+  cursor: pointer; flex-shrink: 0;
+  transition: background 0.25s, transform 0.2s, box-shadow 0.2s;
+  margin-right: 6px;
+}
+.header-cache-clear-btn:hover {
+  background: var(--tint-hi);
+  box-shadow: 0 0 0 2px rgba(var(--a-rgb), 0.25);
+}
+.header-cache-clear-btn:active { transform: scale(0.88); }
+.header-cache-clear-btn.hccb--clearing {
+  animation: hccb-pulse 0.6s ease-in-out;
+  color: var(--a); border-color: var(--a);
+  box-shadow: 0 0 8px rgba(var(--a-rgb), 0.5);
+}
+@keyframes hccb-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.82); }
+  70%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+
+
 .save-btn {
   display: flex; align-items: center; gap: 4px;
   padding: 5px 8px;
