@@ -567,19 +567,14 @@ deactivate_tweaks() {
 log_msg "Started — monitoring foreground app for Encore tweaks"
 FLAG_FILE="/dev/.encore_gamelist_updated"
 
-# Logcat-based volume watcher (parallel)
-# Two extraction paths:
-#   input_focus "entering"  -> pkg/activity format (has slash)
-#   wm_on_resume_called     -> [id,pkg,REASON,...] format (no slash)
+# Logcat per-app watcher (parallel) -- volume, brightness, RR, timeout, conn, ko, cache, encore
 (
     logcat -b events -T 1 2>/dev/null | while IFS= read -r line; do
         pkg=""
         case "$line" in
-            # input_focus: only "entering" events (app gaining focus)
             *"input_focus"*"Focus entering"*)
                 pkg=$(echo "$line" | grep -oE '[a-zA-Z0-9._]+/[a-zA-Z0-9._]+' | cut -d'/' -f1 | tail -n 1)
                 ;;
-            # wm_on_resume_called / am_on_resume_called: [id,pkg,REASON,...]
             *"wm_on_resume_called"*|*"am_on_resume_called"*|*"am_resume_activity"*)
                 pkg=$(echo "$line" | grep -oE '\[[0-9]+,[a-zA-Z0-9._]+' | grep -oE '[a-zA-Z0-9._]+$')
                 ;;
@@ -587,21 +582,76 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         [ -z "$pkg" ] && continue
         echo "$pkg" | grep -q '\.' || continue
         case "$pkg" in
-            android|com.android.systemui|com.android.phone|            com.android.shell|com.topjohnwu.magisk|            com.transsion.hilauncher|com.android.launcher*) continue ;;
+            android|com.android.systemui|com.android.phone|com.android.shell|com.topjohnwu.magisk|com.transsion.hilauncher|com.android.launcher*) continue ;;
         esac
         echo "$pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
-        vol_file="$RR_DIR/$pkg.vol"
-        if [ -f "$vol_file" ]; then
-            vv=$(tr -d '[:space:]' < "$vol_file")
-            if [ -n "$vv" ] && [ "$vv" -ge 0 ] 2>/dev/null && [ "$vv" -le 15 ] 2>/dev/null; then
-                cmd media_session volume --stream 3 --set "$vv" >/dev/null 2>&1 ||                 media volume --stream 3 --set "$vv" 2>/dev/null
-                log_msg "  Vol(logcat): $vv for $pkg"
+        # Volume
+        _vf="$RR_DIR/$pkg.vol"
+        if [ -f "$_vf" ]; then
+            _vv=$(tr -d '[:space:]' < "$_vf")
+            if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null && [ "$_vv" -le 15 ] 2>/dev/null; then
+                cmd media_session volume --stream 3 --set "$_vv" >/dev/null 2>&1 || media volume --stream 3 --set "$_vv" 2>/dev/null
+                log_msg "  Vol(lc): $_vv for $pkg"
             fi
+        fi
+        # Brightness
+        _bf="$RR_DIR/$pkg.bright"
+        if [ -f "$_bf" ]; then
+            _bv=$(tr -d '[:space:]' < "$_bf")
+            if [ -n "$_bv" ] && [ "$_bv" -ge 0 ] 2>/dev/null; then
+                settings put system screen_brightness_mode 0 2>/dev/null
+                settings put system screen_brightness "$_bv" 2>/dev/null
+                log_msg "  Bright(lc): $_bv for $pkg"
+            fi
+        fi
+        # Refresh Rate
+        _mf="$RR_DIR/$pkg.mode"
+        if [ -f "$_mf" ]; then
+            _mid=$(tr -d '[:space:]' < "$_mf")
+            [ -n "$_mid" ] && [ "$_mid" -eq "$_mid" ] 2>/dev/null && service call SurfaceFlinger 1035 i32 "$_mid" >/dev/null 2>&1
+            log_msg "  RR(lc): mode $_mid for $pkg"
+        fi
+        # Screen Timeout
+        _sf="$RR_DIR/$pkg.screentimeout"
+        if [ -f "$_sf" ]; then
+            _sv=$(tr -d '[:space:]' < "$_sf")
+            [ -n "$_sv" ] && [ "$_sv" -gt 0 ] 2>/dev/null && settings put system screen_off_timeout "$_sv" 2>/dev/null
+            log_msg "  Timeout(lc): ${_sv}ms for $pkg"
+        fi
+        # Connection on Launch
+        _cf="$RR_DIR/$pkg.conn"
+        if [ -f "$_cf" ]; then
+            _cv=$(tr -d '[:space:]' < "$_cf")
+            case "$_cv" in
+                wifi) svc wifi enable 2>/dev/null ; log_msg "  Conn(lc): wifi for $pkg" ;;
+                data) svc data enable 2>/dev/null ; log_msg "  Conn(lc): data for $pkg" ;;
+                both) svc wifi enable 2>/dev/null; svc data enable 2>/dev/null ; log_msg "  Conn(lc): wifi+data for $pkg" ;;
+            esac
+        fi
+        # Kill Others
+        if [ -f "$RR_DIR/$pkg.killothers" ]; then
+            kill_others_for_pkg "$pkg"
+            log_msg "  KO(lc): ran for $pkg"
+        fi
+        # Cache Clear
+        if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
+            clear_cache_for_pkg "$pkg"
+            log_msg "  Cache(lc): ran for $pkg"
+        fi
+        # Encore Gaming Mode
+        if gamelist_has_pkg "$pkg"; then
+            _ll=$(get_lite_mode "$pkg")
+            _gl=$(get_global_enforce_lite)
+            [ "$_gl" = "true" ] && _ll="true"
+            _dnd=$(get_enable_dnd "$pkg")
+            activate_tweaks "$pkg" "$_ll" "$_dnd"
+            log_msg "  Encore(lc): activated for $pkg"
         fi
     done
 ) &
 _logcat_vol_pid=$!
-log_msg "Logcat vol watcher started (PID $_logcat_vol_pid)"
+log_msg "Logcat per-app watcher started (PID $_logcat_vol_pid)"
+
 
 while true; do
 
