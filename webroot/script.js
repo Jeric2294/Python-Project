@@ -10956,9 +10956,9 @@ async function _clearSelectedCache() {
     showToast(`Failed to clear ${failed} app cache${failed !== 1 ? 's' : ''}`, 'CACHE', 'error', '🗑');
   }
 
-  _cacheSelected.clear();
-  _renderCacheList(_cacheApps);
-  _updateClearBtn();
+  // NOTE: intentionally NOT clearing _cacheSelected here.
+  // The selection is the persistent "clear on launch" list — daemon reads it on every app launch.
+  // Checkmarks stay checked so user knows which apps will be auto-cleared next time.
   if (btn) btn.disabled = false;
 }
 

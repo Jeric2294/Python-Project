@@ -153,18 +153,27 @@ clear_cache_for_pkg() {
 
     local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
 
-    # No selection = nothing to clear
-    [ -f "$SELECTED_FILE" ] || {
-        log_msg "Cache Clear: no selection file — skipping for $pkg"
+    # Build target list — from Panel 12 selection if file exists and non-empty,
+    # otherwise fall back to ALL third-party apps so clearing always does something.
+    local targets=""
+    if [ -f "$SELECTED_FILE" ] && [ -s "$SELECTED_FILE" ]; then
+        targets=$(cat "$SELECTED_FILE" 2>/dev/null | tr -d '\r' | grep -v '^\s*$')
+        log_msg "Cache Clear: using Panel 12 selection for $pkg"
+    else
+        targets=$(pm list packages -3 2>/dev/null | cut -d: -f2)
+        log_msg "Cache Clear: no Panel 12 selection — falling back to all user apps for $pkg"
+    fi
+
+    [ -z "$targets" ] && {
+        log_msg "Cache Clear: target list empty — skipping for $pkg"
         return
     }
 
     local cleared=0
     local skipped=0
-    local target total_kb did_clear seen_real real_dir kb cache_dir
+    local target did_clear seen_real real_dir cache_dir
 
-    while IFS= read -r target; do
-        # Strip CRLF from WebUI-written file
+    for target in $targets; do
         target=$(printf '%s' "$target" | tr -d '\r')
         { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
 
@@ -180,7 +189,6 @@ clear_cache_for_pkg() {
             com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
         esac
 
-        total_kb=0
         did_clear=0
         seen_real=""
 
@@ -189,24 +197,23 @@ clear_cache_for_pkg() {
             "/data/user_de/0/$target/cache" \
             "/data/data/$target/cache"; do
             [ -d "$cache_dir" ] || continue
+            # Dedup symlinked paths
             real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
             case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
             seen_real="${seen_real}|${real_dir}|"
-            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
-            [ "${kb:-0}" = "0" ] && continue
+            # Always attempt rm-rf — removed unreliable du check
+            # rm -rf on an already-empty dir is a safe no-op
             rm -rf "${cache_dir:?}/"* 2>/dev/null
-            total_kb=$(( total_kb + ${kb:-0} ))
             did_clear=1
         done
 
         if [ "$did_clear" = "1" ]; then
             cleared=$((cleared + 1))
-            log_msg "  CacheClr: $target (~${total_kb}KB)"
+            log_msg "  CacheClr: $target"
         else
             skipped=$((skipped + 1))
         fi
-
-    done < "$SELECTED_FILE"
+    done
 
     local label
     label=$(get_app_label "$pkg")
