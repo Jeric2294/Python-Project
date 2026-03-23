@@ -2478,9 +2478,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
   // Kill Others — always in Game Config; in App Config only if gear toggle is ON
   const _koBlockEl = document.getElementById('popup-ko-block');
   if (_koBlockEl) _koBlockEl.style.display = (isGame || _koGlobalEnabled) ? '' : 'none';
-  // Clear Cache — always in Game Config; in App Config only if gear toggle is ON
-  const _cacheBlockEl = document.getElementById('popup-cache-block');
-  if (_cacheBlockEl) _cacheBlockEl.style.display = (isGame || _cacheGlobalEnabled) ? '' : 'none';
 
 
 
@@ -2546,8 +2543,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
   }
 
 
-  // Store initial cache state for nothingChanged check
-  const _cacheInitRaw = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim();
   if (!_popupInitial) window._popupInitial = {};
 
   _killothersBl       = new Set();
@@ -2682,32 +2677,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     _dataBtn.addEventListener('click', _dataBtn._connHandler);
   }
 
-  // ── Load Cache Clear On Launch state ──
-  const cacheBtn   = document.getElementById('popup-cache-btn');
-  const cacheLabel = document.getElementById('popup-cache-label');
-  const cacheOnDisk = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1';
-  if (cacheBtn) {
-    cacheBtn.setAttribute('aria-pressed', String(cacheOnDisk));
-    cacheBtn.classList.toggle('gaming-toggle-btn--on', cacheOnDisk);
-    if (cacheLabel) cacheLabel.textContent = cacheOnDisk ? 'ON' : 'OFF';
-    if (cacheBtn._cacheHandler) cacheBtn.removeEventListener('click', cacheBtn._cacheHandler);
-    cacheBtn._cacheHandler = async () => {
-      const cur = cacheBtn.getAttribute('aria-pressed') === 'true';
-      if (cur) {
-        // Already ON — re-open popup to edit app list, do NOT toggle off
-        _openCacheClearPopup(pkg);
-        return;
-      }
-      // Turning ON
-      cacheBtn.setAttribute('aria-pressed', 'true');
-      cacheBtn.classList.add('gaming-toggle-btn--on');
-      if (cacheLabel) cacheLabel.textContent = 'ON';
-      await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
-      // Open sub-popup to select apps
-      _openCacheClearPopup(pkg);
-    };
-    cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
-  }
 
   // Load per-app spare from 60Hz drop state — uses dedicated .spare file, isolated from universal
   {
@@ -2771,7 +2740,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     globalEnforceLite,
     ko_on:           koOnDisk,
     conn:            connOnDisk,
-    cache_on:        (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1',
     spare60:         _popupSpare60On,
     hvol_on:         _popupHvolOn,
     hvol_val:        _popupHvolVal,
@@ -2851,7 +2819,6 @@ async function applyRefreshLock() {
   const curDnd      = dndCbCheck?.checked  || false;
   const curKoOn      = koBtnCheck?.getAttribute('aria-pressed') === 'true';
   const curConn      = _popupConnType;
-  const curCacheOn   = document.getElementById('popup-cache-btn')?.getAttribute('aria-pressed') === 'true';
   const nothingChanged = (
     modeId   === _popupInitial.mode   &&
     curBright === _popupInitial.bright &&
@@ -2863,7 +2830,6 @@ async function applyRefreshLock() {
     curDnd    === _popupInitial.enable_dnd &&
     curKoOn      === _popupInitial.ko_on &&
     curConn      === _popupInitial.conn &&
-    curCacheOn   === _popupInitial.cache_on &&
     (document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true') === _popupInitial.spare60 &&
     (document.getElementById('popup-hvol-toggle')?.getAttribute('aria-pressed') === 'true') === _popupInitial.hvol_on &&
     (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val
@@ -3006,15 +2972,6 @@ async function applyRefreshLock() {
     await exec(`rm -f ${RR_DIR}/${currentPkg}.conn`);
   }
 
-  // ── Save Cache Clear On Launch state ─────────────────────────
-  const _cacheAllowed = _currentPopupIsGame || _cacheGlobalEnabled;
-  const _cacheSave = curCacheOn && _cacheAllowed;
-  if (_cacheSave) {
-    await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
-    configuredPkgs.add(currentPkg);
-  } else {
-    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear ${RR_DIR}/${currentPkg}.cacheclear_list`);
-  }
 
   // Badge: all per-app settings
   const hasMode     = !!modeId;
@@ -3023,10 +2980,9 @@ async function applyRefreshLock() {
   const hasFd       = fdOn;
   const hasKo       = _koSave;
   const hasConn     = !!curConn;
-  const hasCache    = _cacheSave;
   const hasEncore   = encoreOn && encoreSaveResult?.ok;
   const hasSpare    = document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true';
-  const hasAnything = hasMode || hasBright || hasVol || hasFd || hasKo || hasConn || hasCache || hasEncore || hasSpare;
+  const hasAnything = hasMode || hasBright || hasVol || hasFd || hasKo || hasConn || hasEncore || hasSpare;
 
   updateConfiguredBadge(currentPkg, hasAnything);
 
@@ -10771,7 +10727,7 @@ function _renderCachePanel() {
     const spared  = _cacheSpared.has(pkg);
     const safeId  = pkg.replace(/\./g, '_');
     return `
-      <div class="list-item" data-pkg="${pkg}" onclick="_toggleCacheSpare('${pkg}')" style="cursor:pointer;">
+      <div class="list-item" data-pkg="${pkg}">
         <div class="item-row">
           <div class="app-icon-wrap" data-pkg="${pkg}">
             <img class="app-icon" alt="${label.toUpperCase()}">
@@ -10781,13 +10737,13 @@ function _renderCachePanel() {
             <span class="item-desc mono">${pkg}</span>
           </div>
         </div>
-        <div class="btn-row">
-          <div id="cache-chk-${safeId}"
-            style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
-            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;
-            transition:background 0.15s;">
-            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
-          </div>
+        <div class="btn-row" style="gap:6px;">
+          ${spared ? `<span id="cache-spare-badge-${safeId}" style="font-size:11px;" title="Spared from clear">🛡</span>` : `<span id="cache-spare-badge-${safeId}"></span>`}
+          <button
+            onclick="event.stopPropagation(); _openCacheClearPopup('${pkg}')"
+            style="background:rgba(var(--a-rgb),0.08);border:0.8px solid rgba(var(--a-rgb),0.25);
+            border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--a);font-size:12px;"
+            title="Configure cache clear for ${label}">⚙</button>
         </div>
       </div>`;
   }).join('');
@@ -10805,13 +10761,10 @@ async function _toggleCacheSpare(pkg) {
   // Persist global spare list
   await exec(lsWrite(GLOBAL_CACHE_SPARE, [..._cacheSpared]));
 
-  // Update checkbox visual
-  const chk    = document.getElementById('cache-chk-' + pkg.replace(/\./g, '_'));
+  // Update spare badge in panel row
+  const badge = document.getElementById('cache-spare-badge-' + pkg.replace(/\./g, '_'));
   const spared = _cacheSpared.has(pkg);
-  if (chk) {
-    chk.style.background = spared ? 'var(--a)' : 'transparent';
-    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
-  }
+  if (badge) badge.textContent = spared ? '🛡' : '';
 
   _updateCachePanelCounts();
 }
@@ -11081,12 +11034,9 @@ async function _toggleCachePopupSpare(pkg) {
     chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
   }
 
-  // Also sync Panel 12 checkbox if loaded
-  const panelChk = document.getElementById('cache-chk-' + pkg.replace(/\./g, '_'));
-  if (panelChk) {
-    panelChk.style.background = spared ? 'var(--a)' : 'transparent';
-    panelChk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
-  }
+  // Also sync Panel 12 spare badge if loaded
+  const panelBadge = document.getElementById('cache-spare-badge-' + pkg.replace(/\./g, '_'));
+  if (panelBadge) panelBadge.textContent = spared ? '🛡' : '';
 
   _updateCachePopupCount();
   // Also update Panel 12 counts if loaded
