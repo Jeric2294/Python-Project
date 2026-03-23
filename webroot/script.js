@@ -290,27 +290,23 @@ function initFabSettings(){
   });
 
   function _syncKoMenuItem(on) {
-    const icon    = document.getElementById('fab-ko-icon');
-    const label   = document.getElementById('fab-ko-label');
-    const item    = document.getElementById('fab-menu-ko');
-    const section = document.getElementById('kill-others-section');
-    if (item)    item.setAttribute('aria-pressed', String(on));
-    if (icon)    icon.textContent  = on ? '⏹' : '○';
-    if (label)   label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
-    if (item)    item.style.opacity = on ? '1' : '0.5';
-    if (section) { section.dataset.hiddenByToggle = on ? '' : '1'; section.style.display = on ? '' : 'none'; }
+    const icon  = document.getElementById('fab-ko-icon');
+    const label = document.getElementById('fab-ko-label');
+    const item  = document.getElementById('fab-menu-ko');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (icon)  icon.textContent  = on ? '⏹' : '○';
+    if (label) label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
   }
 
   function _syncCacheMenuItem(on) {
-    const icon    = document.getElementById('fab-cache-icon');
-    const label   = document.getElementById('fab-cache-label');
-    const item    = document.getElementById('fab-menu-cache');
-    const section = document.getElementById('clear-cache-section');
-    if (item)    item.setAttribute('aria-pressed', String(on));
-    if (icon)    icon.textContent  = on ? '🗑' : '○';
-    if (label)   label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
-    if (item)    item.style.opacity = on ? '1' : '0.5';
-    if (section) { section.dataset.hiddenByToggle = on ? '' : '1'; section.style.display = on ? '' : 'none'; }
+    const icon  = document.getElementById('fab-cache-icon');
+    const label = document.getElementById('fab-cache-label');
+    const item  = document.getElementById('fab-menu-cache');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (icon)  icon.textContent  = on ? '🗑' : '○';
+    if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
   }
 
   function _syncToastMenuItem(on) {
@@ -386,7 +382,7 @@ function initFabSettings(){
     _syncKoMenuItem(_koGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_koGlobalEnabled ? '1' : '0'}' > ${KO_GLOBAL_CFG_FILE}`);
     showToast(
-      _koGlobalEnabled ? 'Kill Others on Launch enabled' : 'Kill Others on Launch disabled',
+      _koGlobalEnabled ? 'Kill Others: visible in App Config' : 'Kill Others: hidden in App Config',
       'KILL OTHERS',
       _koGlobalEnabled ? 'success' : 'info',
       _koGlobalEnabled ? '⏹' : '○'
@@ -400,7 +396,7 @@ function initFabSettings(){
     _syncCacheMenuItem(_cacheGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
     showToast(
-      _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
+      _cacheGlobalEnabled ? 'Clear Cache: visible in App Config' : 'Clear Cache: hidden in App Config',
       'CLEAR CACHE',
       _cacheGlobalEnabled ? 'success' : 'info',
       _cacheGlobalEnabled ? '🗑' : '○'
@@ -446,10 +442,10 @@ function setStatus(msg,color){
 let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
 const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
 
-let _koGlobalEnabled = true;  // controlled by gear icon toggle; persisted to disk
+let _koGlobalEnabled = true;  // controls KO visibility in App Configuration
 const KO_GLOBAL_CFG_FILE = `${CFG_DIR}/ko_global_enabled`;
 
-let _cacheGlobalEnabled = true;  // controlled by gear icon toggle; persisted to disk
+let _cacheGlobalEnabled = true;  // controls Cache visibility in App Configuration
 const CACHE_GLOBAL_CFG_FILE = `${CFG_DIR}/cache_global_enabled`;
 
 function showToast(msg, title='', type='success', icon='', dur=2800) {
@@ -2454,11 +2450,12 @@ async function openPopup(pkg, gearElement, isGame = false) {
     if (el) el.style.display = '';
   });
   // Kill Others — only show if globally enabled via gear toggle
+  // Kill Others — always in Game Config; in App Config only if gear toggle is ON
   const _koBlockEl = document.getElementById('popup-ko-block');
-  if (_koBlockEl) _koBlockEl.style.display = _koGlobalEnabled ? '' : 'none';
-  // Clear Cache — only show if globally enabled via gear toggle
+  if (_koBlockEl) _koBlockEl.style.display = (isGame || _koGlobalEnabled) ? '' : 'none';
+  // Clear Cache — always in Game Config; in App Config only if gear toggle is ON
   const _cacheBlockEl = document.getElementById('popup-cache-block');
-  if (_cacheBlockEl) _cacheBlockEl.style.display = _cacheGlobalEnabled ? '' : 'none';
+  if (_cacheBlockEl) _cacheBlockEl.style.display = (isGame || _cacheGlobalEnabled) ? '' : 'none';
 
 
 
@@ -3964,7 +3961,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const openPanel = document.querySelector('.nexus-panel .panel-details[open]')?.closest('.nexus-panel');
     const statusBar = document.getElementById('main-status-bar');
     document.querySelectorAll('.nexus-panel').forEach(p => {
-      if (p.dataset.hiddenByToggle === '1') return; // skip panels hidden by gear toggle
+      if (p.dataset.hiddenByToggle === '1') return;
       if (openPanel) {
         p.style.display = (p === openPanel) ? '' : 'none';
       } else {
