@@ -411,8 +411,11 @@ apply_non_gaming_logic() {
     fi
 
     # ── Restore Universal Volume lock after leaving per-app mode ──
+    # Skip if the incoming foreground app has its own per-app volume — let it handle itself.
     UNIVERSAL_VOL_FILE="$EXTERNAL_CFG/universal_vol.txt"
-    if [ -f "$UNIVERSAL_VOL_FILE" ]; then
+    _next_fg=$(cat /dev/.davion_last_fg_pkg 2>/dev/null | tr -d '\r\n\t ')
+    _next_vf="$REFRESH_LOCK_DIR/${_next_fg}.vol"
+    if [ ! -f "$_next_vf" ] && [ -f "$UNIVERSAL_VOL_FILE" ]; then
         UV=$(tr -d '\r\n\t ' < "$UNIVERSAL_VOL_FILE")
         if [ -n "$UV" ] && [ "$UV" -ge 0 ] 2>/dev/null && [ "$UV" -le 100 ] 2>/dev/null; then
             apply_volume "$UV"
