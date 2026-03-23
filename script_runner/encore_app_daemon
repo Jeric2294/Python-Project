@@ -147,14 +147,22 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
+
+    # Check global toggle: if OFF, only allow for games
+    if ! cache_global_enabled; then
+        if ! is_game_pkg "$pkg"; then
+            log_msg "  CacheClr: skipped for $pkg — global toggle OFF and not a game"
+            return
+        fi
+    fi
+
     [ -f "$RR_DIR/$pkg.cacheclear_list" ] || return
 
     local cleared=0
     local skipped=0
     local target
+    # Use tr to strip \r from the entire file before reading to avoid issues with IFS
     while IFS= read -r target; do
-        # Strip trailing \r — WebUI writes CRLF line endings.
-        target=$(printf '%s' "$target" | tr -d '\r')
         [ -z "$target" ] && continue
 
         # Check cache size across all known locations.
@@ -212,7 +220,9 @@ clear_cache_for_pkg() {
         cleared=$((cleared + 1))
         log_msg "  CacheClr: cleared $target (rm=${did_rm}, was ~${cache_size}KB)"
 
-    done < "$RR_DIR/$pkg.cacheclear_list"
+    done <<EOF
+$(tr -d '\r' < "$RR_DIR/$pkg.cacheclear_list")
+EOF
 
     local label
     label=$(get_app_label "$pkg")
@@ -658,12 +668,7 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         fi
         # Cache Clear
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            if is_game_pkg "$pkg" || cache_global_enabled; then
-                clear_cache_for_pkg "$pkg"
-                log_msg "  Cache(lc): ran for $pkg"
-            else
-                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
-            fi
+            clear_cache_for_pkg "$pkg"
         fi
         # Encore Gaming Mode
         if gamelist_has_pkg "$pkg"; then
@@ -749,11 +754,8 @@ while true; do
                     kill_others_for_pkg "$current_pkg" &
                 fi
             fi
-            if [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
-                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ]; then
-                if cache_global_enabled; then
-                    clear_cache_for_pkg "$current_pkg" &
-                fi
+            if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
+                clear_cache_for_pkg "$current_pkg" &
             fi
         fi
     fi

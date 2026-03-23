@@ -10887,7 +10887,13 @@ async function _clearSelectedCache() {
   let failed = 0;
 
   for (const pkg of _cacheSelected) {
-    const result = await exec(`pm clear --cache-only ${pkg} 2>/dev/null || rm -rf /data/data/${pkg}/cache 2>/dev/null && echo OK`);
+    const result = await exec(
+      `pm clear --cache-only ${pkg} 2>/dev/null; ` +
+      `rm -rf /data/user/0/${pkg}/cache/* 2>/dev/null; ` +
+      `rm -rf /data/user_de/0/${pkg}/cache/* 2>/dev/null; ` +
+      `rm -rf /data/data/${pkg}/cache/* 2>/dev/null; ` +
+      `echo OK`
+    );
     if (result.includes('Success') || result.includes('OK')) {
       cleared++;
     } else {
