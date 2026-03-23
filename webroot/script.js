@@ -290,23 +290,27 @@ function initFabSettings(){
   });
 
   function _syncKoMenuItem(on) {
-    const icon  = document.getElementById('fab-ko-icon');
-    const label = document.getElementById('fab-ko-label');
-    const item  = document.getElementById('fab-menu-ko');
-    if (item)  item.setAttribute('aria-pressed', String(on));
-    if (icon)  icon.textContent  = on ? '⏹' : '○';
-    if (label) label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
-    if (item)  item.style.opacity = on ? '1' : '0.5';
+    const icon    = document.getElementById('fab-ko-icon');
+    const label   = document.getElementById('fab-ko-label');
+    const item    = document.getElementById('fab-menu-ko');
+    const section = document.getElementById('kill-others-section');
+    if (item)    item.setAttribute('aria-pressed', String(on));
+    if (icon)    icon.textContent  = on ? '⏹' : '○';
+    if (label)   label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
+    if (item)    item.style.opacity = on ? '1' : '0.5';
+    if (section) section.style.display = on ? '' : 'none';
   }
 
   function _syncCacheMenuItem(on) {
-    const icon  = document.getElementById('fab-cache-icon');
-    const label = document.getElementById('fab-cache-label');
-    const item  = document.getElementById('fab-menu-cache');
-    if (item)  item.setAttribute('aria-pressed', String(on));
-    if (icon)  icon.textContent  = on ? '🗑' : '○';
-    if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
-    if (item)  item.style.opacity = on ? '1' : '0.5';
+    const icon    = document.getElementById('fab-cache-icon');
+    const label   = document.getElementById('fab-cache-label');
+    const item    = document.getElementById('fab-menu-cache');
+    const section = document.getElementById('clear-cache-section');
+    if (item)    item.setAttribute('aria-pressed', String(on));
+    if (icon)    icon.textContent  = on ? '🗑' : '○';
+    if (label)   label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
+    if (item)    item.style.opacity = on ? '1' : '0.5';
+    if (section) section.style.display = on ? '' : 'none';
   }
 
   function _syncToastMenuItem(on) {
