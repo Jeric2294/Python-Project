@@ -196,13 +196,12 @@ apply_killothers() {
             if [ -f "$BL_FILE" ] && grep -qxF "$pkg" "$BL_FILE" 2>/dev/null; then
                 continue
             fi
-            # Skip already-stopped apps: pidof + proc state only (fast, no dumpsys)
+            # Skip force-stopped apps only (pidof=dead OR zombie only)
             _pids=$(pidof "$pkg" 2>/dev/null)
             [ -z "$_pids" ] && continue
+            # Only skip zombies — T state is normal Android cached process (SIGSTOP)
             _state=$(cat "/proc/$(echo $_pids | cut -d' ' -f1)/status" 2>/dev/null | grep "^State:" | grep -oE "[RSDTZX]")
-            if [ "$_state" = "T" ] || [ "$_state" = "Z" ] || [ -z "$_state" ]; then
-                continue
-            fi
+            [ "$_state" = "Z" ] && continue
             am force-stop "$pkg" 2>/dev/null
             echo "$pkg" | awk -F. '{print $NF}' >> "$TMP_FILE"
         done
