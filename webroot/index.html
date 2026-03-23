@@ -29,15 +29,6 @@
         <!-- Row 1: Title left, Save/Load/Gear right -->
         <div class="header-bubble-top">
           <div class="header-eyebrow mono" style="font-size:17px;letter-spacing:0.1em;opacity:0.95;font-weight:800;white-space:nowrap;flex:1;min-width:0;">DAVION°ENGINE</div>
-          <!-- Header cache clear circle button -->
-          <button id="btn-header-clear-cache" class="header-cache-clear-btn" aria-label="Clear selected app caches" title="Clear selected caches">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-              <polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              <path d="M9 6V4h6v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
           <div class="header-controls" style="flex-shrink:0;">
             <button id="btn-save-config" class="save-btn" aria-label="Save config">
               <span class="save-icon">◈</span>
@@ -1819,6 +1810,10 @@
             <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
             <span class="popup-toggle-label mono" id="popup-cache-label">OFF</span>
           </button>
+        </div>
+        <div id="popup-cache-select-row" style="display:none;margin-top:6px;">
+          <button id="popup-cache-select-btn" class="nexus-btn" style="width:100%;padding:8px 10px;font-size:10px;letter-spacing:0.04em;"
+            onclick="_openCacheClearPopup(currentPkg)">→ SELECT APPS TO CLEAR (<span id="popup-cache-count">0</span>)</button>
         </div>
       </div>
 
