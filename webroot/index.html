@@ -1542,12 +1542,11 @@
             </button>
           </div>
 
-          <!-- Action buttons: spare all = toggle spare all shown; clear all = clear all user except spared -->
+          <!-- Action button: clear all user app caches except spared -->
           <div style="display:flex;gap:8px;">
-            <button class="nexus-btn" onclick="_toggleSpareAll()" id="btn-spare-all" style="flex:1;padding:8px;font-size:10px;">🛡 SPARE ALL</button>
             <button class="nexus-btn" onclick="_clearAllExceptSpared()" id="btn-clear-cache"
               style="flex:1;padding:8px;font-size:10px;background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.5);color:#f87171;">
-              🗑 CLEAR ALL
+              🗑 CLEAR CACHE
             </button>
           </div>
 
@@ -1848,8 +1847,15 @@
       <!-- App list -->
       <div id="cache-popup-list" class="app-list ko-popup-list-flex"></div>
 
+      <!-- Clear Cache now (manual trigger — same as auto-launch behavior) -->
+      <button id="cache-popup-clear-now" class="nexus-btn nexus-btn--full"
+        style="margin-top:6px;background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.5);color:#f87171;"
+        onclick="_cacheClearNow()">
+        🗑 CLEAR CACHE
+      </button>
+
       <!-- Done -->
-      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:10px;">✓ DONE</button>
+      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:6px;">✓ DONE</button>
     </div>
   </div>
 

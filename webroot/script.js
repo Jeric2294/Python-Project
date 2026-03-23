@@ -10769,27 +10769,6 @@ async function _toggleCacheSpare(pkg) {
   _updateCachePanelCounts();
 }
 
-function _toggleSpareAll() {
-  // Show pool based on current tab/query
-  let pool = _cachePanelTab === 'spared'
-    ? _cacheUserApps.filter(p => _cacheSpared.has(p))
-    : _cacheUserApps;
-  if (_cacheQuery) {
-    const q = _cacheQuery.toLowerCase();
-    pool = pool.filter(p => p.toLowerCase().includes(q) ||
-      (typeof getAppLabel === 'function' && getAppLabel(p).toLowerCase().includes(q)));
-  }
-  const allSpared = pool.every(p => _cacheSpared.has(p));
-  if (allSpared) {
-    pool.forEach(p => _cacheSpared.delete(p));
-  } else {
-    pool.forEach(p => _cacheSpared.add(p));
-  }
-  exec(lsWrite(GLOBAL_CACHE_SPARE, [..._cacheSpared]));
-  _renderCachePanel();
-  _updateCachePanelCounts();
-}
-
 function _filterCacheApps(query) {
   _cacheQuery = query;
   _renderCachePanel();
@@ -10800,13 +10779,18 @@ function _updateCachePanelCounts() {
   const userEl   = document.getElementById('cache-panel-count-user');
   if (sparedEl) sparedEl.textContent = _cacheSpared.size;
   if (userEl)   userEl.textContent   = _cacheUserApps.length;
+}
 
-  // Update SPARE ALL button label
-  const btn = document.getElementById('btn-spare-all');
-  if (btn) {
-    const allSpared = _cacheUserApps.length > 0 && _cacheUserApps.every(p => _cacheSpared.has(p));
-    btn.textContent = allSpared ? '🛡 UNSPARE ALL' : '🛡 SPARE ALL';
-  }
+// Called by CLEAR CACHE button inside the gear popup
+// Runs the same clear-all-except-spared logic immediately (manual trigger)
+async function _cacheClearNow() {
+  const btn = document.getElementById('cache-popup-clear-now');
+  if (btn) { btn.disabled = true; btn.textContent = '⚙ Clearing…'; }
+
+  await _clearAllExceptSpared();
+
+  if (btn) { btn.disabled = false; btn.textContent = '🗑 CLEAR CACHE'; }
+  _closeCacheClearPopup();
 }
 
 async function _clearAllExceptSpared() {
