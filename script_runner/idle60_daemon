@@ -120,61 +120,87 @@ cleanup() {
 trap cleanup INT TERM
 
 # ── Main loop ─────────────────────────────────────────────────
+# Behavior:
+#   Universal SPARE ON  + no per-app mode → skip drop (protect universal RR)
+#   Universal SPARE ON  + has per-app mode → ALLOW drop; restore to per-app on touch
+#   Universal SPARE OFF + any app          → normal drop; restore to universal on touch
+#   App change (any state)                 → restore to universal RR immediately
 DROPPED=0
-_last_restore_reason=""
+_last_pkg=""
 
 while true; do
 
-    # Re-read enabled flag (WebUI may disable mid-run)
+    # Re-read enabled flag live (WebUI may toggle mid-run)
     _en=$(tr -d '[:space:]' < "$IDLE60_ENABLED_FILE" 2>/dev/null)
     if [ "$_en" != "1" ]; then
-        if [ "$DROPPED" = "1" ]; then
-            restore_rr
-            DROPPED=0
-        fi
+        [ "$DROPPED" = "1" ] && restore_rr
         log_msg "Disabled via flag — exiting"
         cleanup
-    fi
-
-    # ── Priority 1: Universal Spare ON → never drop ───────────
-    if [ -f "$UNIV_SPARE60_FILE" ]; then
-        if [ "$DROPPED" = "1" ] && [ "$_last_restore_reason" != "univ_spare" ]; then
-            restore_rr
-            DROPPED=0
-            _last_restore_reason="univ_spare"
-            log_msg "Universal SPARE ON — restored from 60Hz drop"
-        fi
-        sleep 2
-        continue
     fi
 
     # Read global delay
     DELAY=$(tr -d '[:space:]' < "$IDLE60_DELAY_FILE" 2>/dev/null)
     [ -z "$DELAY" ] && DELAY=5
 
-    # ── Compute idle time ──────────────────────────────────────
+    # ── Detect foreground app ─────────────────────────────────
     CUR_PKG=$(get_foreground_pkg)
+
+    # ── App changed → restore to universal immediately ────────
+    if [ "$CUR_PKG" != "$_last_pkg" ]; then
+        if [ "$DROPPED" = "1" ]; then
+            restore_rr
+            DROPPED=0
+            log_msg "App changed ($CUR_PKG) — RR restored to universal"
+        fi
+        _last_pkg="$CUR_PKG"
+    fi
+
+    # ── Check if current app has a per-app RR mode lock ───────
+    HAS_PERAPP=0
+    PERAPP_MODE=""
+    if [ -n "$CUR_PKG" ] && [ -f "$RR_DIR/$CUR_PKG.mode" ]; then
+        PERAPP_MODE=$(tr -d '[:space:]' < "$RR_DIR/$CUR_PKG.mode" 2>/dev/null)
+        [ -n "$PERAPP_MODE" ] && HAS_PERAPP=1
+    fi
+
+    # ── Universal SPARE logic ─────────────────────────────────
+    # SPARE ON + no per-app mode → protect, skip drop
+    # SPARE ON + has per-app mode → allow drop (per-app overrides spare)
+    if [ -f "$UNIV_SPARE60_FILE" ] && [ "$HAS_PERAPP" = "0" ]; then
+        if [ "$DROPPED" = "1" ]; then
+            restore_rr
+            DROPPED=0
+            log_msg "Universal SPARE ON + no per-app mode — restored"
+        fi
+        sleep 2
+        continue
+    fi
+
+    # ── Compute idle time ──────────────────────────────────────
     LAST=$(tr -d '[:space:]' < "$TOUCH_FLAG" 2>/dev/null)
     NOW=$(date +%s)
     [ -z "$LAST" ] && LAST="$NOW"
     IDLE=$((NOW - LAST))
 
-    # Per-app delay override (custom delay per app still works)
+    # Per-app custom delay override
     EFF_DELAY=$(get_app_delay "$CUR_PKG" "$DELAY")
 
     if [ "$IDLE" -ge "$EFF_DELAY" ] && [ "$DROPPED" = "0" ]; then
-        # Idle threshold reached — drop to 60Hz
+        # Drop to 60Hz (mode 0)
         service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1
         DROPPED=1
-        _last_restore_reason=""
-        log_msg "60Hz drop — idle=${IDLE}s delay=${EFF_DELAY}s app=$CUR_PKG"
+        log_msg "60Hz drop — idle=${IDLE}s delay=${EFF_DELAY}s app=$CUR_PKG perapp=$HAS_PERAPP"
 
     elif [ "$IDLE" -lt 2 ] && [ "$DROPPED" = "1" ]; then
-        # Touch detected (idle < 2s) — restore
-        restore_rr
+        # Touch detected — restore to per-app mode OR universal
+        if [ "$HAS_PERAPP" = "1" ] && [ -n "$PERAPP_MODE" ]; then
+            service call SurfaceFlinger 1035 i32 "$PERAPP_MODE" >/dev/null 2>&1
+            log_msg "Touch — restored to per-app mode $PERAPP_MODE ($CUR_PKG)"
+        else
+            restore_rr
+            log_msg "Touch — restored to universal RR"
+        fi
         DROPPED=0
-        _last_restore_reason="touch"
-        log_msg "Touch — RR restored (idle was ${IDLE}s)"
     fi
 
     sleep 1
