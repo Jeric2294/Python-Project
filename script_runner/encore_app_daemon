@@ -141,23 +141,23 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
         log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
     fi
 }
-# ── Clear ALL user app caches on launch (spare list honored) ──────────────
-# File: RR_DIR/pkg.cacheclear        — flag (enabled/disabled)
-# File: RR_DIR/pkg.cacheclear_list   — spare list (apps to SKIP, NOT clear)
+# ── Clear ALL user app caches on launch (global spare list honored) ────────
+# File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
+# File: /sdcard/DAVION_ENGINE/global_cache_spare.txt — global spare list (apps to SKIP)
 #
-# When enabled: clears cache of EVERY user-installed app except:
-#   • the launching app itself
-#   • apps listed in the spare list
-#   • hardcoded system-critical packages
+# Spare list is managed globally from Panel 12 (Cache Manager).
+# All apps that trigger clear share the same spare list.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
 
-    # Build spare set: always spare the launching app itself
+    local GLOBAL_SPARE="/sdcard/DAVION_ENGINE/global_cache_spare.txt"
+
+    # Build spare set: launching app always spared + global spare list
     local spare_list="$pkg"
-    if [ -f "$RR_DIR/$pkg.cacheclear_list" ]; then
+    if [ -f "$GLOBAL_SPARE" ]; then
         spare_list="${spare_list}
-$(tr -d '\r' < "$RR_DIR/$pkg.cacheclear_list" 2>/dev/null)"
+$(tr -d '\r' < "$GLOBAL_SPARE" 2>/dev/null)"
     fi
 
     # Get all user-installed packages
