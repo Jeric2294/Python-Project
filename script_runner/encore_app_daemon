@@ -408,7 +408,7 @@ apply_per_app_screentimeout() {
 restore_screentimeout() {
     [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
     _screentimeout_active_pkg=""
-    # Restore to universal lock if set, else system default (30s)
+    # Restore to universal lock if set, else leave system value untouched
     if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
         local ums
         ums=$(tr -d '[:space:]' < "$UNIVERSAL_SCREENTIMEOUT_FILE")
@@ -418,8 +418,8 @@ restore_screentimeout() {
             return
         fi
     fi
-    settings put system screen_off_timeout 30000 2>/dev/null
-    log_msg "  Screen timeout restored → 30000ms (default)"
+    # No universal set — do NOT reset to 30s, leave Android's own setting intact
+    log_msg "  Screen timeout restore → skipped (no universal set, leaving system value)"
 }
 
 # ── Conn-on-Launch helpers ────────────────────────────────────
