@@ -59,6 +59,18 @@ get_app_label() {
 }
 
 # ── Kill other foreground apps for a package ──────────────────
+# ── Global toggle helpers ──────────────────────────────────────
+ko_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/ko_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]   # default ON if file missing
+}
+cache_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/cache_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]   # default ON if file missing
+}
+
 # Reads $RR_DIR/$pkg.killothers (flag) + $RR_DIR/$pkg.killothers_bl (spare list)
 kill_others_for_pkg() {
     local pkg="$1"
@@ -627,13 +639,21 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         fi
         # Kill Others
         if [ -f "$RR_DIR/$pkg.killothers" ]; then
-            kill_others_for_pkg "$pkg"
-            log_msg "  KO(lc): ran for $pkg"
+            if gamelist_has_pkg "$pkg" || ko_global_enabled; then
+                kill_others_for_pkg "$pkg"
+                log_msg "  KO(lc): ran for $pkg"
+            else
+                log_msg "  KO(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
         # Cache Clear
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            clear_cache_for_pkg "$pkg"
-            log_msg "  Cache(lc): ran for $pkg"
+            if gamelist_has_pkg "$pkg" || cache_global_enabled; then
+                clear_cache_for_pkg "$pkg"
+                log_msg "  Cache(lc): ran for $pkg"
+            else
+                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
         # Encore Gaming Mode
         if gamelist_has_pkg "$pkg"; then
@@ -730,10 +750,13 @@ while true; do
     if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
         _ko_cc_last_pkg="$current_pkg"
         if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
-            [ -f "$RR_DIR/$current_pkg.killothers" ] && kill_others_for_pkg "$current_pkg" &
-            [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
-                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && \
+            if [ -f "$RR_DIR/$current_pkg.killothers" ] && ko_global_enabled; then
+                kill_others_for_pkg "$current_pkg" &
+            fi
+            if [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
+                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && cache_global_enabled; then
                 clear_cache_for_pkg "$current_pkg" &
+            fi
         fi
     fi
 

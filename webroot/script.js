@@ -294,7 +294,6 @@ function initFabSettings(){
     const label = document.getElementById('fab-ko-label');
     const item  = document.getElementById('fab-menu-ko');
     if (item)  item.setAttribute('aria-pressed', String(on));
-    if (icon)  icon.textContent  = on ? '⏹' : '○';
     if (label) label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
     if (item)  item.style.opacity = on ? '1' : '0.5';
   }
@@ -304,7 +303,6 @@ function initFabSettings(){
     const label = document.getElementById('fab-cache-label');
     const item  = document.getElementById('fab-menu-cache');
     if (item)  item.setAttribute('aria-pressed', String(on));
-    if (icon)  icon.textContent  = on ? '🗑' : '○';
     if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
     if (item)  item.style.opacity = on ? '1' : '0.5';
   }
@@ -385,7 +383,7 @@ function initFabSettings(){
       _koGlobalEnabled ? 'Kill Others: visible in App Config' : 'Kill Others: hidden in App Config',
       'KILL OTHERS',
       _koGlobalEnabled ? 'success' : 'info',
-      _koGlobalEnabled ? '⏹' : '○'
+      '⏹'
     );
   });
 
@@ -399,7 +397,7 @@ function initFabSettings(){
       _cacheGlobalEnabled ? 'Clear Cache: visible in App Config' : 'Clear Cache: hidden in App Config',
       'CLEAR CACHE',
       _cacheGlobalEnabled ? 'success' : 'info',
-      _cacheGlobalEnabled ? '🗑' : '○'
+      '🗑'
     );
   });
 
