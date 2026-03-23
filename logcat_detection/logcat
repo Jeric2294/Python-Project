@@ -1445,14 +1445,12 @@ start_volume_daemon() {
             PREV_PKG="$CURR_PKG"
             APP_VOL_FILE="$VOL_DIR/${CURR_PKG}.vol"
             if [ -f "$APP_VOL_FILE" ]; then
-                VV=$(tr -d '
-	 ' < "$APP_VOL_FILE")
+                VV=$(tr -d '[:space:]' < "$APP_VOL_FILE")
                 if [ -n "$VV" ] && [ "$VV" -ge 0 ] 2>/dev/null && [ "$VV" -le 100 ] 2>/dev/null; then
                     apply_volume "$VV"
                 fi
             elif [ -f "$UNIV_VOL" ]; then
-                UV=$(tr -d '
-	 ' < "$UNIV_VOL")
+                UV=$(tr -d '[:space:]' < "$UNIV_VOL")
                 if [ -n "$UV" ] && [ "$UV" -ge 0 ] 2>/dev/null && [ "$UV" -le 100 ] 2>/dev/null; then
                     apply_volume "$UV"
                 fi

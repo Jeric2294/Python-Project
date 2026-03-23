@@ -594,11 +594,11 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         _vf="$RR_DIR/$pkg.vol"
         if [ -f "$_vf" ]; then
             _vv=$(tr -d '[:space:]' < "$_vf")
-            if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null && [ "$_vv" -le 15 ] 2>/dev/null; then
-                media volume --stream 3 --set "$_vv" 2>/dev/null || settings put system volume_music "$_vv" 2>/dev/null
-                cmd media_session volume --stream 3 --set "$_vv" >/dev/null 2>&1; true
-                log_msg "  Vol(lc): $_vv for $pkg"
-            fi
+                if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null && [ "$_vv" -le 100 ] 2>/dev/null; then
+                    media volume --stream 3 --set "$_vv" 2>/dev/null || settings put system volume_music "$_vv" 2>/dev/null
+                    cmd media_session volume --stream 3 --set "$_vv" >/dev/null 2>&1; true
+                    log_msg "  Vol(lc): $_vv for $pkg"
+                fi
         fi
         # Brightness
         _bf="$RR_DIR/$pkg.bright"
@@ -794,7 +794,7 @@ while true; do
         if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
             # Small delay — let app acquire audio focus before forcing volume
             (sleep 0.5 && apply_per_app_volume "$current_pkg") &
-        else
+        elif [ -f "$UNIVERSAL_VOL_FILE" ]; then
             # No per-app vol for this app — restore universal volume
             restore_volume
         fi

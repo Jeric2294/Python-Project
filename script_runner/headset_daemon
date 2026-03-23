@@ -150,7 +150,7 @@ apply_vol_for_pkg() {
     if [ -n "$pkg" ] && [ -f "$RR_DIR/${pkg}.hvol_on" ]; then
         local pvol
         pvol=$(cat "$RR_DIR/${pkg}.hvol" 2>/dev/null | tr -d '[:space:]')
-        if [ -n "$pvol" ] && [ "$pvol" -ge 0 ] 2>/dev/null && [ "$pvol" -le 15 ] 2>/dev/null; then
+        if [ -n "$pvol" ] && [ "$pvol" -ge 0 ] 2>/dev/null && [ "$pvol" -le 100 ] 2>/dev/null; then
             set_vol "$pvol"
             log_msg "per-app vol → $pvol ($pkg)"
             return 0
@@ -161,7 +161,7 @@ apply_vol_for_pkg() {
     if [ -f "$HEADSET_VOL_ON_FILE" ] && [ -f "$HEADSET_VOL_FILE" ]; then
         local gvol
         gvol=$(cat "$HEADSET_VOL_FILE" 2>/dev/null | tr -d '[:space:]')
-        if [ -n "$gvol" ] && [ "$gvol" -ge 0 ] 2>/dev/null && [ "$gvol" -le 15 ] 2>/dev/null; then
+        if [ -n "$gvol" ] && [ "$gvol" -ge 0 ] 2>/dev/null && [ "$gvol" -le 100 ] 2>/dev/null; then
             set_vol "$gvol"
             log_msg "global vol → $gvol (fallback, pkg=${pkg:-unknown})"
             return 0
@@ -201,7 +201,7 @@ on_disconnect() {
     if [ -f "$UNIVERSAL_VOL_FILE" ]; then
         local uvol
         uvol=$(cat "$UNIVERSAL_VOL_FILE" 2>/dev/null | tr -d '[:space:]')
-        if [ -n "$uvol" ] && [ "$uvol" -ge 0 ] 2>/dev/null && [ "$uvol" -le 15 ] 2>/dev/null; then
+        if [ -n "$uvol" ] && [ "$uvol" -ge 0 ] 2>/dev/null && [ "$uvol" -le 100 ] 2>/dev/null; then
             set_vol "$uvol"
             log_msg "restored universal vol → $uvol"
         fi
