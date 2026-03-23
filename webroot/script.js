@@ -117,6 +117,24 @@ function exec(cmd,timeout=5000){
 }
 const execAll=(...cmds)=>Promise.all(cmds.map(c=>exec(c)));
 
+// ── cleanLines: safe read of WebUI-written list files ─────────────────────
+// KSU/APatch native bridge can inject \r into strings passed through exec(),
+// causing package names to become "com.pkg\r" — silent failures everywhere.
+// Always use cleanLines() when reading any file written by this WebUI.
+function cleanLines(raw) {
+  return raw.replace(/\r/g, '').trim().split('\n').filter(Boolean);
+}
+
+// ── lsWrite: safe write of package list to a file ─────────────────────────
+// Uses printf '%s\n' per-arg instead of embedding a join('\n') string into the
+// shell command — avoids \r injection via the KSU/APatch exec bridge.
+// Usage: lsWrite(path, [...set])  → shell cmd string (pass to exec())
+function lsWrite(path, pkgs) {
+  if (!pkgs.length) return `rm -f ${path}`;
+  const args = pkgs.map(p => `'${p.replace(/'/g,"'\\''")}'`).join(' ');
+  return `mkdir -p "$(dirname ${path})" && printf '%s\\n' ${args} > ${path}`;
+}
+
 /* ── Auto-save: called after every apply action ─────────────
    Runs saveAllConfig() silently in background (non-blocking).
    A short debounce prevents redundant writes when multiple
@@ -4017,8 +4035,16 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const det = panel.querySelector('.panel-details');
     if (!det) return;
     det.addEventListener('toggle', () => {
+      // Save scroll position BEFORE _applyPanelFocus() causes reflow.
+      // When a panel closes, all hidden panels get display:'' again — the
+      // DOM reflow resets window.scrollY to 0. We capture the position
+      // here (before the reflow) and restore it on the next animation frame.
+      const savedScroll = det.open ? null : window.scrollY;
       _updatePanelSummaryHeight(panel);
       _applyPanelFocus();
+      if (savedScroll !== null) {
+        requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
+      }
     }, { passive: true });
     _updatePanelSummaryHeight(panel);
   });
@@ -4865,7 +4891,7 @@ async function loadGameListPanel() {
   _glPkgs = merged;
 
   // Write game list to disk so encore_app_daemon can detect games accurately
-  exec(`mkdir -p ${CFG_DIR} && printf '%s\n' ${merged.map(p => `'${p}'`).join(' ')} > ${CFG_DIR}/gl_pkgs 2>/dev/null`);
+  exec(lsWrite(`${CFG_DIR}/gl_pkgs`, merged));
 
   _glLoaded = true;
 
@@ -6051,9 +6077,9 @@ async function loadIdle60Panel() {
 
   _idle60Enabled = enabledRaw.trim() === '1';
   _idle60Delay   = parseInt(delayRaw.trim()) || 5;
-  spareRaw.trim().split('\n').filter(Boolean).forEach(p => _idle60SpareSet.add(p));
+  cleanLines(spareRaw).forEach(p => _idle60SpareSet.add(p));
   _idle60DelayMap = {};
-  delaysRaw.trim().split('\n').filter(Boolean).forEach(line => {
+  cleanLines(delaysRaw).forEach(line => {
     const [p, d] = line.split(':');
     if (p && d) _idle60DelayMap[p.trim()] = parseInt(d.trim());
   });
@@ -6323,7 +6349,7 @@ async function _saveIdle60Spare() {
   const inSet = new Set([..._idle60SpareSet]);
 
   // Read current file to find packages not managed by the idle60 panel set
-  const existing = (await exec(`cat ${IDLE60_SPARE_FILE} 2>/dev/null`)).trim().split('\n').filter(Boolean);
+  const existing = cleanLines(await exec(`cat ${IDLE60_SPARE_FILE} 2>/dev/null`));
 
   // Merge: keep all existing entries + add any in set not already there
   const merged = new Set(existing);
@@ -6339,8 +6365,7 @@ async function _saveIdle60Spare() {
 
   // Simplest correct approach: just write the set — per-app toggles already wrote their changes
   if (!inSet.size) { await exec(`rm -f ${IDLE60_SPARE_FILE}`); return; }
-  const args = [...inSet].map(p => JSON.stringify(p)).join(' ');
-  await exec(`mkdir -p /sdcard/DAVION_ENGINE && printf '%s\n' ${args} > ${IDLE60_SPARE_FILE}`);
+  await exec(lsWrite(IDLE60_SPARE_FILE, [...inSet]));
 }
 
 
@@ -7295,7 +7320,7 @@ async function loadBattSaverPanel() {
     exec(`cat ${BATT_SAVER_SPARE} 2>/dev/null`)
   ]);
   _battSaverEnabled = enabledRaw.trim() === '1';
-  _battSaverSpareSet = new Set(spareRaw.trim().split('\n').filter(Boolean));
+  _battSaverSpareSet = new Set(cleanLines(spareRaw));
   _syncBattSaverToggle();
   renderBattSaverList();
 }
@@ -7404,11 +7429,7 @@ function _buildBattSaverRow(pkg) {
       await exec(`FG=$(cat /dev/.davion_last_fg_pkg 2>/dev/null); [ "$FG" = "${pkg}" ] && settings put global low_power 0 2>/dev/null || true`);
       showToast(`${getAppLabel(pkg)} spared from Battery Saver`, 'BATT SAVER', 'success', '🛡');
     }
-    const pkgs = [..._battSaverSpareSet];
-    const cmds = pkgs.length
-      ? pkgs.map(p => `echo ${JSON.stringify(p)}`).join(' && ')
-      : 'true';
-    await exec(`mkdir -p /sdcard/DAVION_ENGINE && { ${cmds}; } > ${BATT_SAVER_SPARE}`);
+    await exec(lsWrite(BATT_SAVER_SPARE, [..._battSaverSpareSet]));
     renderBattSaverList();
   });
   return row;
@@ -7485,7 +7506,7 @@ async function loadKillOthersPanel() {
     koPkgs.forEach((pkg, i) => {
       if (!_koState[pkg]) _koState[pkg] = { on: false, bl: new Set() };
       _koState[pkg].on = true;
-      _koState[pkg].bl = new Set(blResults[i].trim().split('\n').filter(Boolean));
+      _koState[pkg].bl = new Set(cleanLines(blResults[i]));
     });
   }
 
@@ -7777,8 +7798,7 @@ function _koSpareItem(p, pkg, state, row, renderItems) {
 
     // Persist immediately
     if (state.bl.size > 0) {
-      const args = [...state.bl].map(x => `'${x}'`).join(' ');
-      exec(`mkdir -p ${RR_DIR} && printf '%s\n' ${args} > ${RR_DIR}/${pkg}.killothers_bl`);
+      exec(lsWrite(`${RR_DIR}/${pkg}.killothers_bl`, [...state.bl]));
     } else {
       exec(`rm -f ${RR_DIR}/${pkg}.killothers_bl`);
     }
@@ -7987,8 +8007,7 @@ function _koPopupSpareRow(p) {
 
     // Persist
     if (state.bl.size > 0) {
-      const args = [...state.bl].map(x => `'${x}'`).join(' ');
-      exec(`mkdir -p ${RR_DIR} && printf '%s\n' ${args} > ${RR_DIR}/${_koPopupPkg}.killothers_bl`);
+      exec(lsWrite(`${RR_DIR}/${_koPopupPkg}.killothers_bl`, [...state.bl]));
     } else {
       exec(`rm -f ${RR_DIR}/${_koPopupPkg}.killothers_bl`);
     }
@@ -10921,7 +10940,7 @@ async function _openCacheClearPopup(pkg) {
   _cacheClearOn = flagRaw.trim() === '1';
 
   const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
-  _cacheClearList = new Set(listRaw.trim().split('\n').filter(Boolean));
+  _cacheClearList = new Set(cleanLines(listRaw));
 
   // Sync toggle
   const tog = document.getElementById('cache-popup-toggle');
@@ -11083,9 +11102,8 @@ async function _toggleCacheClearApp(pkg) {
     _cacheClearList.add(pkg);
   }
 
-  // Save list to disk
-  const listStr = [..._cacheClearList].join('\n');
-  await exec(`mkdir -p ${RR_DIR} && printf '%s' '${listStr}' > ${RR_DIR}/${_cacheClearPkg}.cacheclear_list`);
+  // Save list to disk — use lsWrite() to avoid \r injection via KSU/APatch bridge
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheClearList]));
 
   // Update checkbox
   const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');

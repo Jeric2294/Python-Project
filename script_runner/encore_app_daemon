@@ -88,8 +88,9 @@ kill_others_for_pkg() {
 
     local spare_list="$pkg"
     if [ -f "$RR_DIR/$pkg.killothers_bl" ]; then
+        # FIX: strip \r — WebUI writes CRLF; stray \r breaks grep -Fx matching
         spare_list="$spare_list
-$(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
+$(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
     fi
 
     local killed=0
@@ -152,27 +153,37 @@ clear_cache_for_pkg() {
     local skipped=0
     local target
     while IFS= read -r target; do
+        # FIX [1/3]: Strip trailing \r — WebUI writes CRLF line endings.
+        # Without this, $target becomes "com.pkg\r" and all path checks silently fail.
+        target=$(printf '%s' "$target" | tr -d '\r')
         [ -z "$target" ] && continue
 
-        # Check if the cache dir actually has data before clearing
-        # /data/data/$pkg/cache — size 0 or missing means already empty
-        local cache_size=0
-        cache_size=$(du -sk "/data/data/$target/cache" 2>/dev/null | cut -f1)
-        # Also check /data/user/0/$pkg/cache for multi-user setups
-        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
-            cache_size=$(du -sk "/data/user/0/$target/cache" 2>/dev/null | cut -f1)
-        fi
+        # FIX [2/3]: du failure ≠ empty cache. Only skip if we positively confirmed 0 KB.
+        # /data/user/0/ is checked first (correct path on modern Android multi-user).
+        local cache_size
+        cache_size=$(du -sk "/data/user/0/$target/cache" 2>/dev/null | cut -f1)
+        [ -z "$cache_size" ] && \
+            cache_size=$(du -sk "/data/data/$target/cache" 2>/dev/null | cut -f1)
 
-        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
+        # ${cache_size:-1} — if du failed (empty), default to "1" so we still attempt clear
+        if [ "${cache_size:-1}" = "0" ]; then
             skipped=$((skipped + 1))
             log_msg "  CacheClr: $target cache already empty — skipping"
             continue
         fi
 
-        pm clear "$target" 2>/dev/null && {
+        # FIX [3/3]: Use --cache-only to avoid nuking app data (accounts, prefs, DBs).
+        # pm clear without --cache-only = "Clear Data" which wipes EVERYTHING.
+        # Fall back to manual rm -rf for devices/Android versions that don't support --cache-only.
+        if pm clear --cache-only "$target" 2>/dev/null; then
             cleared=$((cleared + 1))
-            log_msg "  CacheClr: cleared $target (was ~${cache_size}KB)"
-        }
+            log_msg "  CacheClr: cleared $target cache (was ~${cache_size:-?}KB)"
+        else
+            rm -rf "/data/user/0/$target/cache" 2>/dev/null
+            rm -rf "/data/data/$target/cache" 2>/dev/null
+            cleared=$((cleared + 1))
+            log_msg "  CacheClr: cleared $target cache via rm (was ~${cache_size:-?}KB)"
+        fi
     done < "$RR_DIR/$pkg.cacheclear_list"
 
     local label
@@ -221,7 +232,9 @@ gamelist_has_pkg() {
 # Returns the lite_mode value (true/false) for a pkg
 get_lite_mode() {
     local pkg="$1"
-    [ -f "$ENCORE_GAMELIST" ] || echo "false"; return
+    # FIX: was "|| echo "false"; return" — semicolon made return ALWAYS execute,
+    # so the awk block below was unreachable even when the file existed.
+    [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
     # Extract the block for this pkg and find lite_mode
     local val
     val=$(awk -v p="\"$pkg\"" '
@@ -238,7 +251,8 @@ get_lite_mode() {
 # Returns the enable_dnd value (true/false) for a pkg
 get_enable_dnd() {
     local pkg="$1"
-    [ -f "$ENCORE_GAMELIST" ] || echo "false"; return
+    # FIX: same always-early-return bug as get_lite_mode
+    [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
     local val
     val=$(awk -v p="\"$pkg\"" '
         $0 ~ p { found=1 }
@@ -253,7 +267,8 @@ get_enable_dnd() {
 
 # Check if enforce_lite_mode is globally set in config.json
 get_global_enforce_lite() {
-    [ -f "$ENCORE_CFG" ] || echo "false"; return
+    # FIX: same always-early-return bug as get_lite_mode
+    [ -f "$ENCORE_CFG" ] || { echo "false"; return; }
     local val
     val=$(grep -o '"enforce_lite_mode"[[:space:]]*:[[:space:]]*[a-z]*' "$ENCORE_CFG" 2>/dev/null \
         | grep -o "true\|false" | head -1)
@@ -667,7 +682,6 @@ while true; do
 
     # ── Vol retrigger — WebUI signals after saving vol config ──
     if [ -f /dev/.davion_vol_retrigger ]; then
-        local retrig_pkg
         retrig_pkg=$(cat /dev/.davion_vol_retrigger 2>/dev/null | tr -d '[:space:]')
         rm -f /dev/.davion_vol_retrigger 2>/dev/null
         if [ -n "$retrig_pkg" ] && [ -f "$RR_DIR/$retrig_pkg.vol" ]; then
@@ -729,7 +743,10 @@ while true; do
         global_lite=$(get_global_enforce_lite)
         [ "$global_lite" = "true" ] && local_lite="true"
         dnd_val=$(get_enable_dnd "$current_pkg")
-        deactivate_tweaks "$current_pkg"
+        # FIX: deactivate whatever is currently active (_active_pkg), not current_pkg.
+        # When A→B→A, _active_pkg=B here — deactivate_tweaks(current_pkg=A) would
+        # skip B's mode revert and leave state inconsistent.
+        [ -n "$_active_pkg" ] && deactivate_tweaks "$_active_pkg"
         activate_tweaks "$current_pkg" "$local_lite" "$dnd_val"
         _was_bg=""
         sleep 1
