@@ -790,10 +790,19 @@ while true; do
         else
             # No per-app vol for this app — check if we should restore universal
             # We restore if the PREVIOUS app had a per-app volume applied
-            if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
-                restore_volume
-                log_msg "  Volume restored to universal (leaving $_prev_vol_pkg)"
-            fi
+            # OR if we are on a launcher/system app (baseline restore)
+            case "$current_pkg" in
+                android|com.android.systemui|*launcher*|*home*)
+                    restore_volume
+                    log_msg "  Volume restored to universal (baseline: $current_pkg)"
+                    ;;
+                *)
+                    if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
+                        restore_volume
+                        log_msg "  Volume restored to universal (leaving $_prev_vol_pkg)"
+                    fi
+                    ;;
+            esac
         fi
     fi
 
