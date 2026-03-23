@@ -186,21 +186,17 @@ clear_cache_for_pkg() {
 
         for cache_dir in \
             "/data/user/0/$target/cache" \
-            "/data/user/0/$target/code_cache" \
             "/data/user_de/0/$target/cache" \
-            "/data/user_de/0/$target/code_cache" \
-            "/data/data/$target/cache" \
-            "/data/data/$target/code_cache"; do
+            "/data/data/$target/cache"; do
             [ -d "$cache_dir" ] || continue
             real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
             case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
             seen_real="${seen_real}|${real_dir}|"
             kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
-            find "$cache_dir" -mindepth 1 -exec rm -rf -- {} + 2>/dev/null
-            if ! find "$cache_dir" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
-                total_kb=$(( total_kb + ${kb:-0} ))
-                [ "${kb:-0}" != "0" ] && did_clear=1
-            fi
+            [ "${kb:-0}" = "0" ] && continue
+            rm -rf "${cache_dir:?}/"* 2>/dev/null
+            total_kb=$(( total_kb + ${kb:-0} ))
+            did_clear=1
         done
 
         if [ "$did_clear" = "1" ]; then
