@@ -1804,7 +1804,8 @@
         <div class="popup-encore-row">
           <div class="popup-encore-info">
             <span class="mono popup-block-label">🗑 CLEAR CACHE ON LAUNCH</span>
-            <span class="popup-encore-sub mono">Triggers CLEAR SELECTED in Cache Manager on launch</span>
+            <span class="popup-encore-sub mono" id="popup-cache-sub">Triggers CLEAR SELECTED in Cache Manager on launch</span>
+            <button id="popup-cache-goto-p12" class="mono" onclick="scrollToPanel('clear-cache-section',true)" style="display:none;margin-top:4px;background:none;border:0.8px solid var(--bdr);border-radius:5px;color:var(--a);font-size:9px;padding:2px 6px;cursor:pointer;letter-spacing:0.06em;">→ OPEN PANEL 12</button>
           </div>
           <button id="popup-cache-btn" class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" aria-pressed="false">
             <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
@@ -1818,59 +1819,6 @@
   </div>
 
 
-
-  <!-- ═══ CACHE CLEAR POPUP ═══ -->
-  <div id="cache-clear-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Cache Clear on Launch" style="display:none;">
-    <div class="app-config-bubble ko-spare-popup-card">
-      <!-- Header -->
-      <div class="app-config-bubble-header">
-        <span style="font-size:16px;">🗑</span>
-        <div style="flex:1;min-width:0;">
-          <div class="mono" style="font-size:10px;color:var(--a);letter-spacing:0.08em;">CLEAR CACHE ON LAUNCH</div>
-          <div class="mono" id="cache-popup-pkg" style="font-size:9px;opacity:0.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
-        </div>
-        <button id="cache-popup-close" class="app-config-close" aria-label="Close">✕</button>
-      </div>
-
-      <!-- Toggle -->
-      <div class="popup-block" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin-bottom:6px;">
-        <div>
-          <div class="mono" style="font-size:10px;color:#f87171;letter-spacing:0.05em;">CLEAR ALL USER APP CACHES ON LAUNCH</div>
-          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">0 apps spared</div>
-        </div>
-        <button class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" id="cache-popup-toggle" aria-pressed="false">
-          <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
-          <span class="mono popup-toggle-label" id="cache-popup-toggle-label">OFF</span>
-        </button>
-      </div>
-
-      <!-- Search -->
-      <div class="search-wrap" style="margin-bottom:6px;">
-        <span class="search-icon mono">⌕</span>
-        <input id="cache-popup-search" class="app-search-input" type="search"
-          placeholder="Filter apps…" autocomplete="off" spellcheck="false">
-        <button id="cache-popup-search-clear" class="search-clear" aria-label="Clear" hidden>✕</button>
-      </div>
-
-      <!-- Tabs: Spared + All user apps only (system tab removed) -->
-      <div class="app-tab-bar" role="tablist" style="margin-bottom:6px;">
-        <button class="app-tab" id="cache-popup-tab-spared" data-cachetab="spared" role="tab" aria-selected="false">
-          <span class="mono">🛡 SPARED</span>
-          <span class="app-tab-count mono" id="cache-popup-count-spared">0</span>
-        </button>
-        <button class="app-tab app-tab--active" id="cache-popup-tab-all" data-cachetab="all" role="tab" aria-selected="true">
-          <span class="mono">USER</span>
-          <span class="app-tab-count mono" id="cache-popup-count-all">—</span>
-        </button>
-      </div>
-
-      <!-- App list -->
-      <div id="cache-popup-list" class="app-list ko-popup-list-flex"></div>
-
-      <!-- Done -->
-      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:10px;">✓ DONE</button>
-    </div>
-  </div>
 
   <!-- ═══ KO SPARE POPUP ═══ -->
   <div id="ko-spare-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Spare from Kill" style="display:none;">

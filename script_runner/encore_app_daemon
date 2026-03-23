@@ -142,11 +142,11 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
     fi
 }
 # ── Clear selected app caches on launch ──────────────────────────────────
-# File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
-# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
+# Flag:  RR_DIR/pkg.cacheclear             (trigger enabled/disabled)
+# List:  /sdcard/DAVION_ENGINE/cache_selected.txt  (from Panel 12 selection)
 #
-# Clears only the apps that are checked/selected in the Cache Manager panel.
-# Same list that CLEAR SELECTED button in the panel uses.
+# Clears only the apps checked in Panel 12 (Clear App Cache).
+# Same list that the CLEAR SELECTED button in that panel uses.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
