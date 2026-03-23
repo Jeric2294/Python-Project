@@ -330,8 +330,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🎮</div>
-          <div class="panel-title">GAME LIST · GAME CONFIGURATION</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">GAME LIST · GAME CONFIGURATION</div>
+            <div class="panel-subtitle">Per-app gaming tweaks & profiles</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -351,8 +354,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">⚡</div>
-        <div class="panel-title">CPU · GOVERNOR &amp; FREQUENCY</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">CPU · GOVERNOR &amp; FREQUENCY</div>
+          <div class="panel-subtitle">Governor, profiles &amp; freq scale</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -477,8 +483,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🖥️</div>
-        <div class="panel-title">GPU · FREQUENCY CONTROL</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">GPU · FREQUENCY CONTROL</div>
+          <div class="panel-subtitle">OPP lock &amp; frequency history</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div style="padding:12px 14px 16px;">
@@ -523,10 +532,13 @@
         </div>
 
         <!-- OPP Table -->
-        <div style="margin-top:14px;">
-          <div class="mono" style="font-size:9px;letter-spacing:0.16em;color:var(--dim);margin-bottom:6px;">OPP TABLE — TAP TO SELECT</div>
-          <div id="gpu-opp-table" style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;"></div>
-        </div>
+        <details style="margin-top:14px;">
+          <summary style="display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:4px 0;" class="mono">
+            <span style="font-size:9px;letter-spacing:0.16em;color:var(--dim);flex:1;">OPP TABLE — TAP TO SELECT</span>
+            <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          </summary>
+          <div id="gpu-opp-table" style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;margin-top:8px;"></div>
+        </details>
 
         <!-- Frequency History Graph -->
         <div style="margin-top:14px;">
@@ -546,8 +558,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🔋</div>
-        <div class="panel-title">BATTERY SECTION · SAVES BATTERY</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">BATTERY SECTION · SAVES BATTERY</div>
+          <div class="panel-subtitle">Idle 60Hz, deep sleep &amp; saver</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div class="panel-body">
@@ -661,8 +676,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🔒</div>
-        <div class="panel-title">UNIVERSAL RR/BRIGHTNESS/VOLUME</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">UNIVERSAL RR/BRIGHTNESS/VOLUME</div>
+          <div class="panel-subtitle">Global display &amp; audio controls</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -932,8 +950,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">📱</div>
-        <div class="panel-title">PER-APP RR/BRIGHTNESS/VOLUME</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">PER-APP RR/BRIGHTNESS/VOLUME</div>
+          <div class="panel-subtitle">Per-app display overrides</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div class="rr-perapp-block" style="padding:0 14px 16px;">
@@ -970,8 +991,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🎨</div>
-        <div class="panel-title">BOOST COLOR · SATURATION</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">BOOST COLOR · SATURATION</div>
+          <div class="panel-subtitle">Saturation &amp; color boost</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -1026,8 +1050,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">✨</div>
-        <div class="panel-title">ANIMATION SCALE</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">ANIMATION SCALE</div>
+          <div class="panel-subtitle">Window &amp; transition speed</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -1134,8 +1161,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🚀</div>
-          <div class="panel-title">KILL OTHERS · LAUNCH MANAGER</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">KILL OTHERS · LAUNCH MANAGER</div>
+            <div class="panel-subtitle">Force-stop apps on game launch</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -1173,8 +1203,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">📡</div>
-          <div class="panel-title">CONNECTION ON LAUNCH</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">CONNECTION ON LAUNCH</div>
+            <div class="panel-subtitle">WiFi &amp; data on app open</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -1269,8 +1302,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">⚡</div>
-          <div class="panel-title">FEATURES · FPS STABILITY</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">FEATURES · FPS STABILITY</div>
+            <div class="panel-subtitle">FPS stability &amp; system tweaks</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body" style="padding:12px 14px 16px;display:flex;flex-direction:column;gap:10px;">
@@ -1488,8 +1524,11 @@
       <details class="panel-details" id="clear-cache-panel">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🗑</div>
-          <div class="panel-title">CLEAR APP CACHE</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">CLEAR APP CACHE</div>
+            <div class="panel-subtitle">Auto-clear cache on app launch</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
 

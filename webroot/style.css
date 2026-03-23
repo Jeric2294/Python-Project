@@ -319,17 +319,26 @@ body::before {
    PANELS
    ═══════════════════════════════════════════════════════ */
 .nexus-panel {
-  background: var(--bg2); border: 0.7px solid var(--border);
-  border-radius: 14px;
-  /* overflow:hidden removed — it breaks position:sticky on panel-summary */
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   position: relative;
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
-  transition: border-color 0.4s, box-shadow 0.4s;
+  transition: border-color 0.35s ease, box-shadow 0.35s ease;
 }
 
-/* Search highlight glow — triggered by JS after scrollIntoView */
+/* Panel open — border glow */
+.nexus-panel:has(.panel-details[open]) {
+  border-color: rgba(var(--a-rgb), 0.5);
+  box-shadow:
+    0 0 0 1px rgba(var(--a-rgb), 0.12),
+    0 0 18px rgba(var(--a-rgb), 0.14),
+    0 4px 20px rgba(0,0,0,0.35);
+}
+
+/* Search highlight glow */
 @keyframes _panel-search-glow {
   0%   { border-color: var(--border); box-shadow: none; }
   15%  { border-color: rgba(var(--a-rgb), 0.85);
@@ -344,148 +353,122 @@ body::before {
   animation: _panel-search-glow 1.8s ease-out forwards;
 }
 
-/* Subpanel glow — for adv-details nested inside panels */
+/* Subpanel glow */
 @keyframes _subpanel-search-glow {
   0%   { box-shadow: none; outline: 2px solid transparent; outline-offset: 2px; }
   15%  { box-shadow: 0 0 0 2px rgba(var(--a-rgb), 0.55),
                      0 0 16px rgba(var(--a-rgb), 0.20);
-         outline: 2px solid rgba(var(--a-rgb), 0.6);
-         outline-offset: 2px;
+         outline: 2px solid rgba(var(--a-rgb), 0.6); outline-offset: 2px;
          border-radius: var(--radius); }
   65%  { box-shadow: 0 0 0 1px rgba(var(--a-rgb), 0.25),
                      0 0 10px rgba(var(--a-rgb), 0.10);
-         outline: 2px solid rgba(var(--a-rgb), 0.25);
-         outline-offset: 2px; }
+         outline: 2px solid rgba(var(--a-rgb), 0.25); outline-offset: 2px; }
   100% { box-shadow: none; outline: 2px solid transparent; outline-offset: 2px; }
 }
 .adv-details--search-glow {
   animation: _subpanel-search-glow 1.8s ease-out forwards;
 }
-.panel-summary {
-  border-radius: 14px 14px 0 0;
-}
+
 .panel-details { display: flex; flex-direction: column; }
-.panel-details[open] > .panel-summary { border-bottom: 0.2px solid var(--border); }
+.panel-details[open] > .panel-summary { border-bottom: 0.5px solid rgba(var(--a-rgb), 0.18); }
 
 .panel-header {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 14px;
   padding: 14px 16px; cursor: pointer; user-select: none;
   -webkit-tap-highlight-color: transparent; list-style: none; position: relative;
 }
 .panel-header::-webkit-details-marker { display: none; }
+
 .panel-summary {
-  transition: background 0.35s;
+  border-radius: 16px 16px 0 0;
+  transition: background 0.25s;
   position: sticky;
   top: var(--header-h, 0px);
   z-index: 50;
-  /* Solid opaque background — must cover scrolling content underneath */
   background: var(--bg2);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
-/* Only stick when the panel is open */
 .panel-details:not([open]) > .panel-summary {
-  position: relative;
-  top: auto;
+  position: relative; top: auto;
+  border-radius: 16px;
 }
-/* Keep background solid (opaque) so scrolled content is fully covered */
 .panel-summary:hover  { background: color-mix(in srgb, var(--bg2) 94%, #fff 6%); }
 .panel-summary:active { background: color-mix(in srgb, var(--bg2) 88%, #fff 12%); }
 
-.panel-tag {
-  font-size: 10px; font-family: var(--mono); font-weight: 700;
-  color: var(--a); background: var(--tint); border: 0.4px solid var(--bdr);
-  border-radius: 4px; padding: 2px 8px; letter-spacing: 0.12em; flex-shrink: 0;
-}
+/* Icon */
+.panel-tag { display: none; }
 .panel-icon {
-  font-family: sans-serif;
-  font-size: 26px;
-  line-height: 1;
-  padding: 7px 9px;
-  letter-spacing: 0;
-  border-radius: 10px;
-  min-width: 48px;
-  text-align: center;
-  display: flex; align-items: center; justify-content: center;
-  transition: box-shadow 0.45s ease, background 0.4s ease, border-color 0.4s ease;
+  font-family: sans-serif; font-size: 24px; line-height: 1;
+  padding: 8px; border-radius: 12px;
+  width: 46px; height: 46px; flex-shrink: 0;
+  text-align: center; display: flex; align-items: center; justify-content: center;
+  background: rgba(var(--a-rgb), 0.07);
+  border: 1px solid rgba(var(--a-rgb), 0.18);
+  transition: background 0.35s, border-color 0.35s, box-shadow 0.35s;
 }
-.panel-title {
-  font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--text); flex: 1;
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* Glow when panel is open */
 .panel-details[open] > .panel-summary .panel-icon {
-  background: rgba(var(--a-rgb), 0.18);
-  border-color: var(--a);
-  box-shadow:
-    0 0 8px rgba(var(--a-rgb), 0.55),
-    0 0 20px rgba(var(--a-rgb), 0.30),
-    inset 0 0 6px rgba(var(--a-rgb), 0.15);
+  background: rgba(var(--a-rgb), 0.16);
+  border-color: rgba(var(--a-rgb), 0.65);
+  box-shadow: 0 0 12px rgba(var(--a-rgb), 0.35), inset 0 0 6px rgba(var(--a-rgb), 0.10);
+}
+
+/* Title + subtitle */
+.panel-title-wrap {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
 }
 .panel-title {
-  font-size: 12px; font-weight: 700; letter-spacing: 0.10em;
-  text-transform: uppercase; color: var(--text); flex: 1;
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color 0.25s;
 }
+.panel-details[open] > .panel-summary .panel-title { color: var(--a); }
+.panel-subtitle {
+  font-size: 9px; letter-spacing: 0.07em; color: var(--dim);
+  font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.75;
+}
+
+/* Status dot */
+.panel-status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(var(--a-rgb), 0.2);
+  border: 1px solid rgba(var(--a-rgb), 0.4);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.panel-details[open] > .panel-summary .panel-status-dot {
+  background: var(--a);
+  box-shadow: 0 0 6px rgba(var(--a-rgb), 0.8), 0 0 12px rgba(var(--a-rgb), 0.4);
+}
+
 .panel-line { display: none; }
 
 .adv-arrow-btn { display: flex; align-items: center; flex-shrink: 0; }
 .adv-arrow-icon {
-  width: 28px; height: 28px;
-  color: var(--a);
-  opacity: 0.45;
-  transition: transform 0.5s var(--out), opacity 0.2s, filter 0.2s;
+  width: 26px; height: 26px; color: var(--a); opacity: 0.35;
+  transition: transform 0.4s var(--out), opacity 0.2s, filter 0.2s;
   filter: drop-shadow(0 0 0px var(--a));
 }
 details[open] > .panel-summary .adv-arrow-icon,
 details[open] > .adv-summary .adv-arrow-icon {
-  transform: rotate(180deg);
-  opacity: 1;
-  filter: drop-shadow(0 0 6px var(--a));
+  transform: rotate(180deg); opacity: 1;
+  filter: drop-shadow(0 0 5px var(--a));
 }
 .panel-summary:hover .adv-arrow-icon,
 .adv-summary:hover .adv-arrow-icon {
-  opacity: 0.8;
-  filter: drop-shadow(0 0 4px var(--a));
+  opacity: 0.7; filter: drop-shadow(0 0 3px var(--a));
 }
 
 /* Panel number watermark */
 .nexus-panel::before {
   content: attr(data-pnum);
   position: absolute; right: 14px; top: 4px;
-  font-size: 80px; font-weight: 900;
-  color: var(--a); opacity: 0.10;
+  font-size: 72px; font-weight: 900;
+  color: var(--a); opacity: 0.06;
   font-family: var(--font); line-height: 1;
   pointer-events: none; z-index: 0;
 }
 
-/* ── Advanced details ── */
-.adv-details { border-top: 0.2px solid var(--border); }
-.adv-details[open] { background: rgba(0,0,0,0.08); }
-.adv-summary {
-  display: flex; align-items: center; gap: 10px;
-  padding: 13px 16px; cursor: pointer;
-  font-size: 12px; letter-spacing: 0.12em; color: var(--dim);
-  font-family: var(--mono); text-transform: uppercase;
-  list-style: none; user-select: none; -webkit-tap-highlight-color: transparent;
-  transition: color 0.35s, background 0.15s;
-  /* Stick subpanel title below the panel header when subpanel is open */
-  position: sticky;
-  top: calc(var(--header-h, 0px) + var(--panel-summary-h, 52px));
-  z-index: 40;
-  /* Solid opaque background — covers content scrolling underneath */
-  background: var(--bg2);
-}
-/* Only stick when subpanel is open */
-.adv-details:not([open]) > .adv-summary {
-  position: relative;
-  top: auto;
-}
-.adv-summary::-webkit-details-marker { display: none; }
-/* Keep background solid (opaque) so scrolled content is fully covered */
-.adv-summary:hover  { color: var(--text); background: color-mix(in srgb, var(--bg2) 94%, #fff 6%); }
-.adv-summary:active { background: color-mix(in srgb, var(--bg2) 88%, #fff 12%); }
-/* Bigger arrow for subpanels */
+/* Subpanel arrow size */
 .adv-details .adv-arrow-icon { width: 22px; height: 22px; }
 .adv-inner { padding: 10px 14px 14px; }
 
