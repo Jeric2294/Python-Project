@@ -2587,9 +2587,7 @@ async function openPopup(pkg, gearElement, isGame = false) {
   }
 
 
-  // Store initial cache state for nothingChanged check
-  const _cacheInitRaw = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim();
-  if (!_popupInitial) window._popupInitial = {};
+  // cache_on initial state is captured below in the _popupInitial assignment
 
   _killothersBl       = new Set();
   _killothersBlPkgs   = [];
@@ -2727,6 +2725,12 @@ async function openPopup(pkg, gearElement, isGame = false) {
   const cacheBtn   = document.getElementById('popup-cache-btn');
   const cacheLabel = document.getElementById('popup-cache-label');
   const cacheOnDisk = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim() === '1';
+
+  const cacheSubEl = document.getElementById('popup-cache-sub');
+  if (cacheSubEl) {
+    cacheSubEl.textContent = 'Auto-trigger cache clear from header button on launch';
+  }
+
   if (cacheBtn) {
     cacheBtn.setAttribute('aria-pressed', String(cacheOnDisk));
     cacheBtn.classList.toggle('gaming-toggle-btn--on', cacheOnDisk);
@@ -2738,11 +2742,7 @@ async function openPopup(pkg, gearElement, isGame = false) {
       cacheBtn.setAttribute('aria-pressed', String(next));
       cacheBtn.classList.toggle('gaming-toggle-btn--on', next);
       if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
-      if (next) {
-        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
-      } else {
-        await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear`);
-      }
+      // UI-only toggle — actual save deferred to APPLY button
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
@@ -3047,11 +3047,19 @@ async function applyRefreshLock() {
   // ── Save Cache Clear On Launch state ─────────────────────────
   const _cacheAllowed = _currentPopupIsGame || _cacheGlobalEnabled;
   const _cacheSave = curCacheOn && _cacheAllowed;
+  if (curCacheOn && !_cacheAllowed) {
+    // User toggled cache ON but global App cache is disabled — warn instead of silently ignoring
+    showToast(
+      'Enable "Clear Cache on Launch" globally for Apps first',
+      'CACHE CLEAR', 'info', '🗑'
+    );
+  }
   if (_cacheSave) {
     await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
     configuredPkgs.add(currentPkg);
   } else {
-    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear ${RR_DIR}/${currentPkg}.cacheclear_list`);
+    // Only remove the flag — preserve cacheclear_list so re-enabling restores the selection
+    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear`);
   }
 
   // Badge: all per-app settings
@@ -10746,6 +10754,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const tab = e.target.closest('[data-cachetab2]');
     if (tab) _switchCachePanelTab(tab.dataset.cachetab2);
   });
+
+  // ── Header circle clear-cache button ──────────────────────────────────
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (hb) {
+    hb.addEventListener('click', async () => {
+      await _headerClearCacheClick();
+    });
+    // Init state (dim if nothing selected yet)
+    _syncHeaderCacheBtn();
+  }
 });
 
 async function _loadCacheApps() {
@@ -10875,7 +10893,8 @@ function _toggleCacheSelect(pkg, row) {
 function _selectAllCacheApps() {
   const allSelected = _cacheApps.every(p => _cacheSelected.has(p));
   if (allSelected) {
-    _cacheSelected.clear();
+    // Only deselect current tab's apps — keep other tabs' selections intact
+    _cacheApps.forEach(p => _cacheSelected.delete(p));
   } else {
     _cacheApps.forEach(p => _cacheSelected.add(p));
   }
@@ -10888,6 +10907,17 @@ function _selectAllCacheApps() {
 function _updateClearBtn() {
   const btn = document.getElementById('btn-clear-cache');
   if (btn) btn.textContent = `🗑 CLEAR (${_cacheSelected.size})`;
+  _syncHeaderCacheBtn();
+}
+
+function _syncHeaderCacheBtn() {
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (!hb) return;
+  const count = _cacheSelected.size;
+  hb.style.opacity = count > 0 ? '1' : '0.45';
+  hb.setAttribute('title', count > 0
+    ? `Clear cache \u2014 ${count} app${count !== 1 ? 's' : ''} selected`
+    : 'No apps selected \u2014 open Clear App Cache panel first');
 }
 
 function _filterCacheApps(query) {
@@ -10930,22 +10960,23 @@ async function _clearSelectedCache() {
     showToast(`Failed to clear ${failed} app cache${failed !== 1 ? 's' : ''}`, 'CACHE', 'error', '🗑');
   }
 
-  _cacheSelected.clear();
+  // Keep selections intact — they persist for auto-clear on launch.
+  // Only re-render + re-enable button (no _cacheSelected.clear()).
   _renderCacheList(_cacheApps);
   _updateClearBtn();
+  _updateSparedCount();
   if (btn) btn.disabled = false;
 }
 
 /* ═══════════════════════════════════════════════════════════
    CACHE CLEAR ON LAUNCH — Per-app popup
-   NEW LOGIC: clear ALL user app caches on launch, except spared list.
+   Each app has its OWN selection list of apps to clear on launch.
    File: RR_DIR/pkg.cacheclear        (flag — enabled/disabled)
-   File: RR_DIR/pkg.cacheclear_list   (spare list — apps to SKIP)
+   File: RR_DIR/pkg.cacheclear_list   (selected apps TO CLEAR)
    ═══════════════════════════════════════════════════════════ */
 
 let _cacheClearPkg     = '';
-let _cacheClearOn      = false;
-let _cacheSpareList    = new Set();   // apps to SPARE (skip) from clearing
+let _cacheClearList    = new Set();   // apps SELECTED to clear on launch
 let _cacheClearAllPkgs = [];          // user packages (system excluded)
 let _cacheClearTab     = 'all';
 let _cacheClearQuery   = '';
@@ -10958,25 +10989,11 @@ async function _openCacheClearPopup(pkg) {
 
   if (pkgEl) pkgEl.textContent = pkg;
 
-  // Load enabled flag
-  const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
-  _cacheClearOn = flagRaw.trim() === '1';
-
-  // Load spare list (apps to SKIP — not clear)
+  // Load selected-to-clear list (apps TO CLEAR on launch)
   const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
-  _cacheSpareList = new Set(cleanLines(listRaw));
-
-  // Sync toggle
-  const tog      = document.getElementById('cache-popup-toggle');
-  const togLabel = document.getElementById('cache-popup-toggle-label');
-  if (tog) {
-    tog.setAttribute('aria-pressed', String(_cacheClearOn));
-    tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
-    if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
-  }
+  _cacheClearList = new Set(cleanLines(listRaw));
 
   // Load user app list fresh each time (system packages excluded).
-  // Do NOT filter out pkg here — filter at render time so switching apps always shows correct list.
   const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
   _cacheClearAllPkgs = cleanLines(rawUser);
 
@@ -11006,7 +11023,7 @@ async function _openCacheClearPopup(pkg) {
     };
   }
 
-  // Wire tabs (spared / all)
+  // Wire tabs (selected / all)
   document.querySelectorAll('[data-cachetab]').forEach(btn => {
     btn.onclick = () => {
       _cacheClearTab = btn.dataset.cachetab;
@@ -11018,21 +11035,6 @@ async function _openCacheClearPopup(pkg) {
     };
   });
 
-  // Wire toggle
-  if (tog) {
-    tog.onclick = async () => {
-      _cacheClearOn = !_cacheClearOn;
-      tog.setAttribute('aria-pressed', String(_cacheClearOn));
-      tog.classList.toggle('gaming-toggle-btn--on', _cacheClearOn);
-      if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
-      if (_cacheClearOn) {
-        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
-      } else {
-        await exec(`rm -f ${RR_DIR}/${_cacheClearPkg}.cacheclear`);
-      }
-    };
-  }
-
   // Wire close + done
   document.getElementById('cache-popup-close')?.addEventListener('click', _closeCacheClearPopup);
   document.getElementById('cache-popup-done')?.addEventListener('click', _closeCacheClearPopup);
@@ -11043,15 +11045,25 @@ async function _openCacheClearPopup(pkg) {
 function _closeCacheClearPopup() {
   const overlay = document.getElementById('cache-clear-popup');
   if (overlay) overlay.style.display = 'none';
-  const spared  = _cacheSpareList.size;
-  const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
-  if (_cacheClearOn) {
-    const msg = spared > 0
-      ? `Cache cleared on launch • ${spared} app${spared !== 1 ? 's' : ''} spared`
-      : 'Cache cleared on launch • all user apps';
-    showToast(msg, appName.toUpperCase(), 'success', '🗑');
-  } else {
-    showToast('Cache clear on launch disabled', appName.toUpperCase(), 'info', '🗑');
+  const selected = _cacheClearList.size;
+  const appName  = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
+
+  // Update the count in the per-app config popup button
+  _syncPopupCacheCount();
+
+  showToast(
+    selected > 0
+      ? `${selected} app${selected !== 1 ? 's' : ''} selected for cache clear`
+      : 'No apps selected — cache clear won\'t run',
+    appName.toUpperCase(), selected > 0 ? 'success' : 'info', '🗑'
+  );
+}
+
+// Sync the subtitle in the App Config popup (select-row removed — toggle only)
+function _syncPopupCacheCount() {
+  const subEl = document.getElementById('popup-cache-sub');
+  if (subEl) {
+    subEl.textContent = 'Auto-trigger cache clear from header button on launch';
   }
 }
 
@@ -11059,10 +11071,10 @@ function _renderCachePopupList() {
   const list = document.getElementById('cache-popup-list');
   if (!list) return;
 
-  // spared tab: show only spared apps; all tab: show all user apps
-  // Always exclude the launching app itself — it's permanently spared
-  let pool = (_cacheClearTab === 'spared'
-    ? _cacheClearAllPkgs.filter(p => _cacheSpareList.has(p))
+  // selected tab: show only selected apps; all tab: show all user apps
+  // Always exclude the launching app itself
+  let pool = (_cacheClearTab === 'selected'
+    ? _cacheClearAllPkgs.filter(p => _cacheClearList.has(p))
     : _cacheClearAllPkgs
   ).filter(p => p && p !== _cacheClearPkg);
 
@@ -11076,17 +11088,16 @@ function _renderCachePopupList() {
 
   if (!pool.length) {
     list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">${
-      _cacheClearTab === 'spared' ? 'No apps spared' : 'No apps'
+      _cacheClearTab === 'selected' ? 'No apps selected' : 'No apps'
     }</div>`;
     return;
   }
 
   list.innerHTML = pool.map(p => {
-    const label  = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
-    const spared = _cacheSpareList.has(p);
-    // Spared = shield icon + highlighted; not spared = will be cleared (checkmark style)
+    const label    = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
+    const selected = _cacheClearList.has(p);
     return `
-      <div class="list-item" data-pkg="${p}" onclick="_toggleCacheSpareApp('${p}')">
+      <div class="list-item" data-pkg="${p}" onclick="_toggleCacheClearApp('${p}')">
         <div class="item-row">
           <div class="app-icon-wrap" data-pkg="${p}">
             <img class="app-icon" alt="${label.toUpperCase()}">
@@ -11099,8 +11110,8 @@ function _renderCachePopupList() {
         <div class="btn-row">
           <div id="cachepop-chk-${p.replace(/\./g,'_')}"
             style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
-            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
-            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
+            background:${selected ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${selected ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : ''}
           </div>
         </div>
       </div>`;
@@ -11109,36 +11120,105 @@ function _renderCachePopupList() {
   if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
 }
 
-async function _toggleCacheSpareApp(pkg) {
-  if (_cacheSpareList.has(pkg)) {
-    _cacheSpareList.delete(pkg);
+async function _toggleCacheClearApp(pkg) {
+  if (_cacheClearList.has(pkg)) {
+    _cacheClearList.delete(pkg);
   } else {
-    _cacheSpareList.add(pkg);
+    _cacheClearList.add(pkg);
   }
 
-  // Save spare list to disk — shell reads this to skip these apps
-  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheSpareList]));
+  // Save selection list to disk — daemon reads this to know WHICH apps to clear
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheClearList]));
 
   // Update checkbox
-  const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');
-  const chk    = document.getElementById(safeId);
-  const spared = _cacheSpareList.has(pkg);
+  const safeId   = 'cachepop-chk-' + pkg.replace(/\./g, '_');
+  const chk      = document.getElementById(safeId);
+  const selected = _cacheClearList.has(pkg);
   if (chk) {
-    chk.style.background = spared ? 'var(--a)' : 'transparent';
-    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
+    chk.style.background = selected ? 'var(--a)' : 'transparent';
+    chk.innerHTML = selected ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : '';
   }
   _updateCachePopupCount();
 }
 
-function _updateCachePopupCount() {
-  const spared  = _cacheSpareList.size;
-  const total   = _cacheClearAllPkgs.filter(p => p !== _cacheClearPkg).length;
-  const sprdTab = document.getElementById('cache-popup-count-spared');
-  const allTab  = document.getElementById('cache-popup-count-all');
-  const main    = document.getElementById('cache-popup-count');
-  if (sprdTab) sprdTab.textContent = spared;
-  if (allTab)  allTab.textContent  = total;
-  if (main)    main.textContent    = spared > 0
-    ? `${spared} app${spared !== 1 ? 's' : ''} spared`
-    : 'all user apps will be cleared';
+async function _cacheClearSelectAll() {
+  const pool = _cacheClearAllPkgs.filter(p => p && p !== _cacheClearPkg);
+  const allSelected = pool.every(p => _cacheClearList.has(p));
+  if (allSelected) {
+    pool.forEach(p => _cacheClearList.delete(p));
+  } else {
+    pool.forEach(p => _cacheClearList.add(p));
+  }
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheClearList]));
+  _renderCachePopupList();
+  _updateCachePopupCount();
 }
+
+function _updateCachePopupCount() {
+  const selected = _cacheClearList.size;
+  const total    = _cacheClearAllPkgs.filter(p => p !== _cacheClearPkg).length;
+  const selTab   = document.getElementById('cache-popup-count-selected');
+  const allTab   = document.getElementById('cache-popup-count-all');
+  const main     = document.getElementById('cache-popup-count');
+  if (selTab) selTab.textContent = selected;
+  if (allTab) allTab.textContent = total;
+  if (main)   main.textContent   = selected > 0
+    ? `${selected} app${selected !== 1 ? 's' : ''} selected`
+    : 'no apps selected';
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HEADER CIRCLE CACHE-CLEAR BUTTON
+   Same logic as _clearSelectedCache() but triggered from the header.
+   Also used as the auto-trigger target when Clear Cache on Launch fires.
+   ═══════════════════════════════════════════════════════════════════ */
+
+async function _headerClearCacheClick() {
+  // If cache panel hasn't been loaded yet, load it first
+  if (!_cacheLoaded) await _loadCacheApps();
+
+  if (!_cacheSelected.size) {
+    showToast('No apps selected — open Clear App Cache panel to select apps', 'CACHE', 'info', '🗑');
+    return;
+  }
+
+  const hb = document.getElementById('btn-header-clear-cache');
+  if (hb) {
+    hb.classList.add('hccb--clearing');
+    setTimeout(() => hb.classList.remove('hccb--clearing'), 700);
+  }
+
+  // Delegate to the shared clear function
+  await _clearSelectedCache();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   AUTO-CLICK: Clear Cache on Launch toggle hook
+   When an app with cache-clear-on-launch enabled is detected in the
+   logcat watcher in encore_app_daemon (shell side), it fires the
+   actual cache clearing. On the WebUI side, we also auto-click the
+   header circle button so the user gets visual feedback.
+
+   The daemon writes a trigger flag:
+     /dev/.davion_cache_clear_webui_trigger
+   We poll it and auto-click the circle when it appears.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const _CACHE_WEBUI_TRIGGER = '/dev/.davion_cache_clear_webui_trigger';
+let _cacheWebUiTriggerPoller = null;
+
+function _startCacheWebUiTriggerPoller() {
+  if (_cacheWebUiTriggerPoller) return;
+  _cacheWebUiTriggerPoller = setInterval(async () => {
+    const res = await exec(`[ -f ${_CACHE_WEBUI_TRIGGER} ] && cat ${_CACHE_WEBUI_TRIGGER} && rm -f ${_CACHE_WEBUI_TRIGGER} || echo ""`).catch(() => '');
+    const pkg = (res || '').trim();
+    if (!pkg) return;
+    // Actually click the header delete icon — triggers the full handler
+    const hb = document.getElementById('btn-header-clear-cache');
+    if (hb) hb.click();
+  }, 2000);
+}
+
+// Start the poller once DOM is ready
+document.addEventListener('DOMContentLoaded', _startCacheWebUiTriggerPoller);
+

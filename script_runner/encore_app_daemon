@@ -143,19 +143,19 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
 }
 # ── Clear selected app caches on launch ──────────────────────────────────
 # File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
-# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
+# File: RR_DIR/pkg.cacheclear_list        — per-app list of apps TO CLEAR
 #
-# Clears only the apps that are checked/selected in the Cache Manager panel.
-# Same list that CLEAR SELECTED button in the panel uses.
+# Each app has its own selection list. Daemon reads .cacheclear_list directly
+# and clears the cache of every app in that list.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
 
-    local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
+    local LIST_FILE="$RR_DIR/$pkg.cacheclear_list"
 
-    # No selection = nothing to clear
-    [ -f "$SELECTED_FILE" ] || {
-        log_msg "Cache Clear: no selection file — skipping for $pkg"
+    # No selection list = nothing to clear
+    [ -f "$LIST_FILE" ] || {
+        log_msg "Cache Clear: no selection list — skipping for $pkg"
         return
     }
 
@@ -206,7 +206,7 @@ clear_cache_for_pkg() {
             skipped=$((skipped + 1))
         fi
 
-    done < "$SELECTED_FILE"
+    done < "$LIST_FILE"
 
     local label
     label=$(get_app_label "$pkg")
@@ -651,13 +651,13 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             fi
         fi
         # Cache Clear — fires if this app has cache clear enabled
-        # New behavior: clears ALL user app caches except spare list
+        # Matches KO pattern: always run for games, check global toggle for apps
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            if cache_global_enabled; then
-                clear_cache_for_pkg "$pkg"
+            if is_game_pkg "$pkg" || cache_global_enabled; then
+                clear_cache_for_pkg "$pkg" &
                 log_msg "  Cache(lc): ran for $pkg"
             else
-                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
+                log_msg "  Cache(lc): skipped for $pkg — not a game & global toggle OFF"
             fi
         fi
         # Encore Gaming Mode
