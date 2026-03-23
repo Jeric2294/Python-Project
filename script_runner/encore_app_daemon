@@ -565,8 +565,15 @@ activate_tweaks() {
     # ── Kill Others: force-stop other apps now ────────────────
     kill_others_for_pkg "$pkg" &
 
-    # ── Cache Clear: clear all other user app caches if configured ───────────
-    [ -f "$RR_DIR/$pkg.cacheclear" ] && clear_cache_for_pkg "$pkg" &
+    # ── Cache Clear (Encore games) — non-Encore handled by logcat watcher ─
+    # cache_global_enabled guard keeps this consistent with all other launch paths
+    if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
+        if cache_global_enabled; then
+            clear_cache_for_pkg "$pkg" &
+        else
+            log_msg "  Cache(tweaks): skipped for $pkg — global toggle OFF"
+        fi
+    fi
 }
 
 # ── Deactivate tweaks and revert to normal ────────────────────
@@ -658,8 +665,8 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             fi
         fi
         # Cache Clear — fires if this app has cache clear enabled
-        # New behavior: clears ALL user app caches except spare list
-        if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
+        # Encore games are handled inside activate_tweaks() below — skip here to avoid double execution
+        if [ -f "$RR_DIR/$pkg.cacheclear" ] && ! gamelist_has_pkg "$pkg"; then
             if cache_global_enabled; then
                 clear_cache_for_pkg "$pkg"
                 log_msg "  Cache(lc): ran for $pkg"

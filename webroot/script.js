@@ -10796,7 +10796,6 @@ async function _loadCacheApps() {
     _cacheApps = _cacheUserApps;
     _renderCacheList(_cacheApps);
     _updateClearBtn();
-    _updateSparedCount();
 
     // Load system apps in background
     exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 12000).then(rawSystem => {
@@ -10809,22 +10808,9 @@ async function _loadCacheApps() {
   }
 }
 
-function _updateSparedCount() {
-  const spared = [..._cacheUserApps, ..._cacheSystemApps].filter(p => !_cacheSelected.has(p)).length;
-  const el = document.getElementById('cache-panel-count-spared');
-  // Show count of user apps NOT selected (i.e., spared from clearing)
-  const userSpared = _cacheUserApps.filter(p => !_cacheSelected.has(p)).length;
-  if (el) el.textContent = userSpared;
-}
-
 function _switchCachePanelTab(tab) {
   _cachePanelTab = tab;
-  if (tab === 'spared') {
-    // Spared = user apps NOT selected (won't be cleared)
-    _cacheApps = _cacheUserApps.filter(p => !_cacheSelected.has(p));
-  } else {
-    _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
-  }
+  _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
   document.querySelectorAll('[data-cachetab2]').forEach(b => {
     const active = b.dataset.cachetab2 === tab;
     b.classList.toggle('app-tab--active', active);
@@ -10935,17 +10921,30 @@ async function _clearSelectedCache() {
   let cleared = 0, failed = 0;
 
   for (const pkg of _cacheSelected) {
-    // rm cache contents across all paths — same as daemon
+    // Check if any cache dir exists and has content, then clear
     const res = await exec(
-      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do` +
-      `  [ -d "$d" ] && rm -rf "$d/"* 2>/dev/null; done; echo OK`
+      `_did=0; ` +
+      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do ` +
+      `  [ -d "$d" ] || continue; ` +
+      `  rm -rf "$d/"* 2>/dev/null && _did=1; ` +
+      `done; ` +
+      `echo $_did`
     );
-    if (res.includes('OK')) cleared++; else failed++;
+    const trimmed = res.trim();
+    if (trimmed === '1') cleared++;
+    // trimmed === "0" means cache dirs exist but already empty — still count as cleared
+    // If res is empty (exec timeout/error), count as failed
+    else if (trimmed === '') failed++;
   }
 
   if (status) {
-    status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
-    status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
+    if (failed > 0) {
+      status.style.color = '#f59e0b';
+      status.textContent = `⚠ Cleared ${cleared} · Failed: ${failed}`;
+    } else {
+      status.style.color = 'var(--a)';
+      status.textContent = `✔ Cleared ${cleared} app(s)`;
+    }
   }
   if (cleared > 0) {
     showToast(
@@ -10954,11 +10953,14 @@ async function _clearSelectedCache() {
     );
   } else if (failed > 0) {
     showToast(`Failed to clear ${failed} app cache${failed !== 1 ? 's' : ''}`, 'CACHE', 'error', '🗑');
+  } else {
+    showToast('Caches already empty', 'CACHE', 'info', '🗑');
   }
 
-  // NOTE: intentionally NOT clearing _cacheSelected here.
-  // The selection is the persistent "clear on launch" list — daemon reads it on every app launch.
-  // Checkmarks stay checked so user knows which apps will be auto-cleared next time.
+  // Selection stays on disk — daemon uses it on every launch.
+  // Re-render so UI reflects current state (checkmarks stay checked).
+  _renderCacheList(_cacheApps);
+  _updateClearBtn();
   if (btn) btn.disabled = false;
 }
 
