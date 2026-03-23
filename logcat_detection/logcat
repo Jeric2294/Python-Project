@@ -196,10 +196,9 @@ apply_killothers() {
             if [ -f "$BL_FILE" ] && grep -qxF "$pkg" "$BL_FILE" 2>/dev/null; then
                 continue
             fi
-            # Only add to killed list if app was actually running (had a PID)
-            _had_pid=$(pidof "$pkg" 2>/dev/null)
+            _pre_pid=$(pidof "$pkg" 2>/dev/null)
             am force-stop "$pkg" 2>/dev/null
-            [ -n "$_had_pid" ] && echo "$pkg" | awk -F. '{print $NF}' >> "$TMP_FILE"
+            [ -n "$_pre_pid" ] && echo "$pkg" | awk -F. '{print $NF}' >> "$TMP_FILE"
         done
 
         KILLED_COUNT=0

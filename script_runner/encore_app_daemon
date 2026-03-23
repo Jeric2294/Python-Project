@@ -88,34 +88,24 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
             com.google.android.gms|com.google.android.gsf) continue ;;
         esac
 
-        # Skip only truly dead/zombie processes
-        # T state = Android SIGSTOP on cached apps = should still be killed
-        local pids
-        pids=$(pidof "$target" 2>/dev/null)
-        if [ -z "$pids" ]; then
-            skipped=$((skipped + 1))
-            log_msg "  KO: $target no PID — skip"
-            continue
-        fi
-        local proc_state
-        proc_state=$(cat "/proc/$(echo $pids | cut -d' ' -f1)/status" 2>/dev/null             | grep "^State:" | grep -oE "[RSDTZX]")
-        if [ "$proc_state" = "Z" ]; then
-            skipped=$((skipped + 1))
-            log_msg "  KO: $target zombie — skip"
-            continue
-        fi
-
+        # Kill app — check PID before to know if it was running (for notification)
+        local _pre_pids
+        _pre_pids=$(pidof "$target" 2>/dev/null)
         am force-stop "$target" 2>/dev/null
-        killed=$((killed + 1))
-        # Collect ultra-short app name (first 6 chars of last segment)
-        local short_name
-        short_name=$(echo "$target" | awk -F. '{print substr($NF,1,6)}')
-        if [ -z "$killed_names" ]; then
-            killed_names="$short_name"
+        if [ -n "$_pre_pids" ]; then
+            killed=$((killed + 1))
+            local short_name
+            short_name=$(echo "$target" | awk -F. '{print substr($NF,1,6)}')
+            if [ -z "$killed_names" ]; then
+                killed_names="$short_name"
+            else
+                killed_names="$killed_names $short_name"
+            fi
+            log_msg "  KO: killed $target"
         else
-            killed_names="$killed_names $short_name"
+            skipped=$((skipped + 1))
+            log_msg "  KO: $target already stopped — not in notification"
         fi
-        log_msg "  KO: force-stopped $target (pids: $pids)"
     done
 
     local label

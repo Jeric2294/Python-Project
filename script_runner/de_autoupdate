@@ -58,19 +58,29 @@ changed_files=""
 changed_count=0
 _needs_httpd=0
 _needs_encore=0
+_needs_logcat=0
 _needs_rr_guard=0
 _needs_idle60=0
 _needs_battery_guard=0
 _needs_headset=0
+_needs_otg=0
+_needs_thermal_wdog=0
+_needs_ai=0
+_needs_hot_reload=0
 
 mark_restart() {
     case "$1" in
         webroot/*)             _needs_httpd=1 ;;
         script_runner/encore_app_daemon) _needs_encore=1 ;;
+        logcat_detection/logcat|        logcat_detection/dumpsys2)       _needs_logcat=1 ;;
         script_runner/rr_guard)          _needs_rr_guard=1 ;;
         script_runner/idle60_daemon)     _needs_idle60=1 ;;
         script_runner/battery_guard)     _needs_battery_guard=1 ;;
         script_runner/headset_daemon)    _needs_headset=1 ;;
+        script_runner/otg_daemon)         _needs_otg=1 ;;
+        script_runner/thermal_watchdog)   _needs_thermal_wdog=1 ;;
+        script_runner/ai_thermal_predict|        script_runner/ai_adaptive_freq|        script_runner/ai_app_classifier)  _needs_ai=1 ;;
+        script_runner/hot_reload_daemon)  _needs_hot_reload=1 ;;
     esac
 }
 
@@ -144,6 +154,17 @@ if [ "$_needs_encore" = "1" ]; then
     log_msg "  Restarted: encore_app_daemon"
 fi
 
+if [ "$_needs_logcat" = "1" ]; then
+    pkill -f "GovThermal.*logcat" 2>/dev/null
+    pkill -f "GovThermal.*dumpsys2" 2>/dev/null
+    sleep 0.5
+    chmod 755 "$MODDIR/logcat_detection/logcat" 2>/dev/null
+    chmod 755 "$MODDIR/logcat_detection/dumpsys2" 2>/dev/null
+    nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
+    restarted="$restarted Logcat"
+    log_msg "  Restarted: logcat_detection"
+fi
+
 if [ "$_needs_rr_guard" = "1" ]; then
     pkill -f "rr_guard" 2>/dev/null
     sleep 0.5
@@ -177,6 +198,42 @@ msg="${changed_count} file(s) updated"
 [ -n "$restarted" ] && msg="$msg · Restarted:$restarted"
 notify "$msg" "success"
 log_msg "Update complete: $msg"
+
+if [ "$_needs_otg" = "1" ]; then
+    pkill -f "otg_daemon" 2>/dev/null
+    sleep 0.5
+    nohup sh "$MODDIR/script_runner/otg_daemon" >> "$LOG" 2>&1 &
+    restarted="$restarted OTG"
+    log_msg "  Restarted: otg_daemon"
+fi
+
+if [ "$_needs_thermal_wdog" = "1" ]; then
+    pkill -f "thermal_watchdog" 2>/dev/null
+    sleep 0.5
+    nohup sh "$MODDIR/script_runner/thermal_watchdog" >> "$LOG" 2>&1 &
+    restarted="$restarted ThermalWdog"
+    log_msg "  Restarted: thermal_watchdog"
+fi
+
+if [ "$_needs_ai" = "1" ]; then
+    pkill -f "ai_thermal_predict" 2>/dev/null
+    pkill -f "ai_adaptive_freq" 2>/dev/null
+    pkill -f "ai_app_classifier" 2>/dev/null
+    sleep 0.5
+    nohup sh "$MODDIR/script_runner/ai_thermal_predict" >> "$LOG" 2>&1 &
+    nohup sh "$MODDIR/script_runner/ai_adaptive_freq" >> "$LOG" 2>&1 &
+    nohup sh "$MODDIR/script_runner/ai_app_classifier" >> "$LOG" 2>&1 &
+    restarted="$restarted AI"
+    log_msg "  Restarted: AI daemons"
+fi
+
+if [ "$_needs_hot_reload" = "1" ]; then
+    pkill -f "hot_reload_daemon" 2>/dev/null
+    sleep 0.5
+    nohup sh "$MODDIR/script_runner/hot_reload_daemon" >> "$LOG" 2>&1 &
+    restarted="$restarted HotReload"
+    log_msg "  Restarted: hot_reload_daemon"
+fi
 
 # Signal WebUI to reload if webroot changed
 [ "$_needs_httpd" = "1" ] && echo "reload" >> "$STATUS_FILE"
