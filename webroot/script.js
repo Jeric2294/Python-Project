@@ -2587,7 +2587,9 @@ async function openPopup(pkg, gearElement, isGame = false) {
   }
 
 
-  // cache_on initial state is captured below in the _popupInitial assignment
+  // Store initial cache state for nothingChanged check
+  const _cacheInitRaw = (await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`)).trim();
+  if (!_popupInitial) window._popupInitial = {};
 
   _killothersBl       = new Set();
   _killothersBlPkgs   = [];
@@ -2755,11 +2757,12 @@ async function openPopup(pkg, gearElement, isGame = false) {
       if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
       if (cacheSelectRow) cacheSelectRow.style.display = next ? '' : 'none';
       if (next) {
+        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
         // Auto-open selection popup so user can pick apps
-        // .cacheclear flag is written only on APPLY — no pre-emptive disk write
         _openCacheClearPopup(pkg);
+      } else {
+        await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear`);
       }
-      // UI-only toggle — actual save deferred to APPLY button
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
@@ -3064,19 +3067,11 @@ async function applyRefreshLock() {
   // ── Save Cache Clear On Launch state ─────────────────────────
   const _cacheAllowed = _currentPopupIsGame || _cacheGlobalEnabled;
   const _cacheSave = curCacheOn && _cacheAllowed;
-  if (curCacheOn && !_cacheAllowed) {
-    // User toggled cache ON but global App cache is disabled — warn instead of silently ignoring
-    showToast(
-      'Enable "Clear Cache on Launch" globally for Apps first',
-      'CACHE CLEAR', 'info', '🗑'
-    );
-  }
   if (_cacheSave) {
     await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
     configuredPkgs.add(currentPkg);
   } else {
-    // Only remove the flag — preserve cacheclear_list so re-enabling restores the selection
-    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear`);
+    await exec(`rm -f ${RR_DIR}/${currentPkg}.cacheclear ${RR_DIR}/${currentPkg}.cacheclear_list`);
   }
 
   // Badge: all per-app settings
