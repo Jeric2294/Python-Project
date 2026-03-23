@@ -9626,7 +9626,7 @@ function renderPyroxState() {
   const ribTxt = document.getElementById('pyrox-ribbon-text');
 
   btn?.setAttribute('aria-pressed', pyroxEnabled ? 'true' : 'false');
-  if (label) label.textContent = pyroxEnabled ? 'ENABLED' : 'DISABLED';
+  if (label) label.textContent = pyroxEnabled ? 'ON' : 'OFF';
 
   if (ribbon) ribbon.classList.toggle('ribbon-danger', pyroxEnabled);
   if (ribIcon) ribIcon.textContent = pyroxEnabled ? '🔥' : '🛡';

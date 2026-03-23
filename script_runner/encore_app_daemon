@@ -88,13 +88,31 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
             com.google.android.gms|com.google.android.gsf) continue ;;
         esac
 
-        # Only kill apps that are actually running (have a live PID)
-        # pidof returns empty if the process is already dead/force-stopped
+        # Check if truly running:
+        # 1. Must have a live PID
+        # 2. Process state must be R/S/D (running/sleeping/waiting)
+        #    T = stopped (SIGSTOP), Z = zombie — skip both
         local pids
         pids=$(pidof "$target" 2>/dev/null)
         if [ -z "$pids" ]; then
             skipped=$((skipped + 1))
-            log_msg "  KO: $target already stopped — skipping"
+            log_msg "  KO: $target no PID — already stopped"
+            continue
+        fi
+        # Check process state from /proc/PID/status
+        local proc_state
+        proc_state=$(cat "/proc/$(echo $pids | cut -d' ' -f1)/status" 2>/dev/null             | grep "^State:" | grep -oE "[RSDTZX]")
+        if [ "$proc_state" = "T" ] || [ "$proc_state" = "Z" ] || [ -z "$proc_state" ]; then
+            skipped=$((skipped + 1))
+            log_msg "  KO: $target state=$proc_state — already stopped/zombie"
+            continue
+        fi
+        # Also check dumpsys package stopped flag
+        local is_stopped
+        is_stopped=$(dumpsys package "$target" 2>/dev/null             | grep -m1 "stopped=" | grep -o "stopped=true")
+        if [ "$is_stopped" = "stopped=true" ]; then
+            skipped=$((skipped + 1))
+            log_msg "  KO: $target package stopped=true — skipping"
             continue
         fi
 
