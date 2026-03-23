@@ -761,13 +761,16 @@ while true; do
     if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
         _ko_cc_last_pkg="$current_pkg"
         if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
-            if [ -f "$RR_DIR/$current_pkg.killothers" ] && { is_game_pkg "$current_pkg" || ko_global_enabled; }; then
-                kill_others_for_pkg "$current_pkg" &
+            if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
+                if is_game_pkg "$current_pkg" || ko_global_enabled; then
+                    kill_others_for_pkg "$current_pkg" &
+                fi
             fi
             if [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
-                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && \
-                { is_game_pkg "$current_pkg" || cache_global_enabled; }; then
-                clear_cache_for_pkg "$current_pkg" &
+                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ]; then
+                if is_game_pkg "$current_pkg" || cache_global_enabled; then
+                    clear_cache_for_pkg "$current_pkg" &
+                fi
             fi
         fi
     fi
