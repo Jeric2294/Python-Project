@@ -10896,12 +10896,17 @@ async function _clearAllExceptSpared() {
 
 /* ═══════════════════════════════════════════════════════════
    CACHE CLEAR ON LAUNCH — Per-app popup
-   Toggle only — spare list is managed globally in Panel 12.
-   File: RR_DIR/pkg.cacheclear  (flag — trigger enabled/disabled)
+   Toggle = trigger flag per-app.
+   App list = spare from clear (reads/writes global spare list).
+   File: RR_DIR/pkg.cacheclear          (trigger flag)
+   File: GLOBAL_CACHE_SPARE             (shared spare list)
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheClearPkg = '';
-let _cacheClearOn  = false;
+let _cacheClearPkg      = '';
+let _cacheClearOn       = false;
+let _cacheClearAllPkgs  = [];    // user apps for popup list
+let _cacheClearTab      = 'all';
+let _cacheClearQuery    = '';
 
 async function _openCacheClearPopup(pkg) {
   _cacheClearPkg = pkg;
@@ -10911,7 +10916,7 @@ async function _openCacheClearPopup(pkg) {
   const pkgEl = document.getElementById('cache-popup-pkg');
   if (pkgEl) pkgEl.textContent = pkg;
 
-  // Load flag only — spare list is global (managed in Cache Manager panel)
+  // Load trigger flag
   const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
   _cacheClearOn = flagRaw.trim() === '1';
 
@@ -10924,14 +10929,53 @@ async function _openCacheClearPopup(pkg) {
     if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
   }
 
-  // Update count label with global spared count
-  const countEl = document.getElementById('cache-popup-count');
-  if (countEl) {
-    const sparedCount = _cacheSpared.size;
-    countEl.textContent = sparedCount > 0
-      ? `Clears all except ${sparedCount} spared app${sparedCount !== 1 ? 's' : ''}`
-      : 'Clears all user app caches on launch';
+  // Load user app list (fresh each open, exclude current app)
+  const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
+  _cacheClearAllPkgs = cleanLines(rawUser).filter(p => p && p !== pkg);
+
+  // If _cacheSpared not loaded yet (Panel 12 not opened), load global spare list
+  if (!_cacheLoaded) {
+    const rawSpare = await exec(`cat ${GLOBAL_CACHE_SPARE} 2>/dev/null`);
+    _cacheSpared = new Set(cleanLines(rawSpare));
   }
+
+  _cacheClearTab   = 'all';
+  _cacheClearQuery = '';
+  _renderCachePopupList();
+  _updateCachePopupCount();
+
+  // Wire search
+  const searchEl = document.getElementById('cache-popup-search');
+  const clearEl  = document.getElementById('cache-popup-search-clear');
+  if (searchEl) {
+    searchEl.value = '';
+    searchEl.oninput = () => {
+      _cacheClearQuery = searchEl.value;
+      if (clearEl) clearEl.hidden = !_cacheClearQuery;
+      _renderCachePopupList();
+    };
+  }
+  if (clearEl) {
+    clearEl.hidden = true;
+    clearEl.onclick = () => {
+      if (searchEl) searchEl.value = '';
+      _cacheClearQuery = '';
+      clearEl.hidden = true;
+      _renderCachePopupList();
+    };
+  }
+
+  // Wire tabs
+  document.querySelectorAll('[data-cachetab]').forEach(btn => {
+    btn.onclick = () => {
+      _cacheClearTab = btn.dataset.cachetab;
+      document.querySelectorAll('[data-cachetab]').forEach(b => {
+        b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
+        b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
+      });
+      _renderCachePopupList();
+    };
+  });
 
   // Wire toggle
   if (tog) {
@@ -10948,7 +10992,6 @@ async function _openCacheClearPopup(pkg) {
     };
   }
 
-  // Wire close + done
   document.getElementById('cache-popup-close')?.addEventListener('click', _closeCacheClearPopup);
   document.getElementById('cache-popup-done')?.addEventListener('click', _closeCacheClearPopup);
 
@@ -10958,10 +11001,106 @@ async function _openCacheClearPopup(pkg) {
 function _closeCacheClearPopup() {
   const overlay = document.getElementById('cache-clear-popup');
   if (overlay) overlay.style.display = 'none';
+  const spared  = _cacheSpared.size;
   const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
-  showToast(
-    _cacheClearOn ? 'Clear cache on launch enabled' : 'Clear cache on launch disabled',
-    appName.toUpperCase(), _cacheClearOn ? 'success' : 'info', '🗑'
-  );
+  if (_cacheClearOn) {
+    const msg = spared > 0
+      ? `Clear on launch \u2022 ${spared} app${spared !== 1 ? 's' : ''} spared`
+      : 'Clear on launch \u2022 all user apps';
+    showToast(msg, appName.toUpperCase(), 'success', '🗑');
+  } else {
+    showToast('Clear cache on launch disabled', appName.toUpperCase(), 'info', '🗑');
+  }
 }
 
+function _renderCachePopupList() {
+  const list = document.getElementById('cache-popup-list');
+  if (!list) return;
+
+  let pool = _cacheClearTab === 'spared'
+    ? _cacheClearAllPkgs.filter(p => _cacheSpared.has(p))
+    : _cacheClearAllPkgs;
+
+  if (_cacheClearQuery) {
+    const q = _cacheClearQuery.toLowerCase();
+    pool = pool.filter(p => p.toLowerCase().includes(q) ||
+      (typeof getAppLabel === 'function' && getAppLabel(p).toLowerCase().includes(q)));
+  }
+
+  _updateCachePopupCount();
+
+  if (!pool.length) {
+    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">${
+      _cacheClearTab === 'spared' ? 'No apps spared' : 'No apps'
+    }</div>`;
+    return;
+  }
+
+  list.innerHTML = pool.map(p => {
+    const label  = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
+    const spared = _cacheSpared.has(p);
+    return `
+      <div class="list-item" data-pkg="${p}" onclick="_toggleCachePopupSpare('${p}')">
+        <div class="item-row">
+          <div class="app-icon-wrap" data-pkg="${p}">
+            <img class="app-icon" alt="${label.toUpperCase()}">
+          </div>
+          <div class="item-info">
+            <span class="item-title">${label.toUpperCase()}</span>
+            <span class="item-desc mono">${p}</span>
+          </div>
+        </div>
+        <div class="btn-row">
+          <div id="cachepop-chk-${p.replace(/\./g,'_')}"
+            style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
+            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
+}
+
+async function _toggleCachePopupSpare(pkg) {
+  if (_cacheSpared.has(pkg)) {
+    _cacheSpared.delete(pkg);
+  } else {
+    _cacheSpared.add(pkg);
+  }
+
+  // Persist to global spare list — same file Panel 12 uses
+  await exec(lsWrite(GLOBAL_CACHE_SPARE, [..._cacheSpared]));
+
+  // Update checkbox
+  const chk    = document.getElementById('cachepop-chk-' + pkg.replace(/\./g, '_'));
+  const spared = _cacheSpared.has(pkg);
+  if (chk) {
+    chk.style.background = spared ? 'var(--a)' : 'transparent';
+    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
+  }
+
+  // Also sync Panel 12 checkbox if loaded
+  const panelChk = document.getElementById('cache-chk-' + pkg.replace(/\./g, '_'));
+  if (panelChk) {
+    panelChk.style.background = spared ? 'var(--a)' : 'transparent';
+    panelChk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
+  }
+
+  _updateCachePopupCount();
+  // Also update Panel 12 counts if loaded
+  if (typeof _updateCachePanelCounts === 'function') _updateCachePanelCounts();
+}
+
+function _updateCachePopupCount() {
+  const spared  = _cacheSpared.size;
+  const sprdTab = document.getElementById('cache-popup-count-spared');
+  const allTab  = document.getElementById('cache-popup-count-all');
+  const main    = document.getElementById('cache-popup-count');
+  if (sprdTab) sprdTab.textContent = spared;
+  if (allTab)  allTab.textContent  = _cacheClearAllPkgs.length;
+  if (main)    main.textContent    = spared > 0
+    ? `${spared} app${spared !== 1 ? 's' : ''} spared from clear`
+    : 'Clears all user app caches on launch';
+}
