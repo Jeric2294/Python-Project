@@ -11213,12 +11213,19 @@ function _startCacheWebUiTriggerPoller() {
     const res = await exec(`[ -f ${_CACHE_WEBUI_TRIGGER} ] && cat ${_CACHE_WEBUI_TRIGGER} && rm -f ${_CACHE_WEBUI_TRIGGER} || echo ""`).catch(() => '');
     const pkg = (res || '').trim();
     if (!pkg) return;
-    // Actually click the header delete icon — triggers the full handler
+    // Auto-click the header clear button for visual feedback
     const hb = document.getElementById('btn-header-clear-cache');
-    if (hb) hb.click();
+    if (hb) {
+      hb.classList.add('hccb--clearing');
+      setTimeout(() => hb.classList.remove('hccb--clearing'), 700);
+    }
+    // Ensure cache apps are loaded then run the clear
+    if (!_cacheLoaded) await _loadCacheApps();
+    if (_cacheSelected.size > 0) {
+      await _clearSelectedCache();
+    }
   }, 2000);
 }
 
 // Start the poller once DOM is ready
 document.addEventListener('DOMContentLoaded', _startCacheWebUiTriggerPoller);
-
