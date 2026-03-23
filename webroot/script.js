@@ -380,7 +380,7 @@ function initFabSettings(){
     _syncKoMenuItem(_koGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_koGlobalEnabled ? '1' : '0'}' > ${KO_GLOBAL_CFG_FILE}`);
     showToast(
-      _koGlobalEnabled ? 'Kill Others: visible in App Config' : 'Kill Others: hidden in App Config',
+      _koGlobalEnabled ? 'Kill Others on Launch enabled' : 'Kill Others on Launch disabled',
       'KILL OTHERS',
       _koGlobalEnabled ? 'success' : 'info',
       '⏹'
@@ -394,7 +394,7 @@ function initFabSettings(){
     _syncCacheMenuItem(_cacheGlobalEnabled);
     await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
     showToast(
-      _cacheGlobalEnabled ? 'Clear Cache: visible in App Config' : 'Clear Cache: hidden in App Config',
+      _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
       'CLEAR CACHE',
       _cacheGlobalEnabled ? 'success' : 'info',
       '🗑'
@@ -431,10 +431,107 @@ function initFabSettings(){
    § 5  Status bar
    ═══════════════════════════════════════════════════════════ */
 let _st=null;
-function setStatus(msg,color){
-  const el=document.getElementById('debug-msg');if(!el)return;
-  el.textContent=msg;el.style.color=color||'var(--a)';
-  clearTimeout(_st);_st=setTimeout(()=>{el.textContent='SYS READY · MODULE ONLINE';el.style.color='';},2800);
+let _tickerInterval = null;
+let _tickerIndex = 0;
+
+function _buildStatusTicker() {
+  const segments = ['SYS READY · MODULE ONLINE'];
+
+  // CPU profile
+  if (activeProfile) segments.push(`⚡ CPU ${activeProfile.toUpperCase()}`);
+
+  // GPU lock
+  const gpuOppEl = document.getElementById('gpu-opp-index-val');
+  const gpuLockEl = document.getElementById('gpu-lock-status');
+  if (gpuLockEl?.textContent === 'LOCKED' && gpuOppEl?.textContent !== '—')
+    segments.push(`🖥 GPU LOCK OPP${gpuOppEl.textContent}`);
+
+  // Universal RR
+  if (rrActive) segments.push(`🔒 RR ${rrActive}Hz`);
+
+  // Idle 60Hz
+  if (_idle60Enabled) segments.push(`📺 IDLE 60Hz ON`);
+
+  // RR Guard
+  if (_rrGuardEnabled) segments.push(`🛡 RR GUARD ON`);
+
+  // Deep Sleep Gov
+  if (deepSleepGovActive) segments.push(`💤 DEEP SLEEP ON`);
+
+  // Battery Saver
+  if (_battSaverEnabled) segments.push(`🔋 BATT SAVER ON`);
+
+  // Cool Mode
+  if (coolModeEnabled) segments.push(`❄ COOL MODE ON`);
+
+  // CPU Volt Optimizer
+  if (cpuVoltEnabled) segments.push(`⚡ VOLT OPT ON`);
+
+  // Pyrox Thermal
+  if (pyroxEnabled) segments.push(`🌡 PYROX ON`);
+
+  return segments;
+}
+
+function _tickStatus() {
+  const el    = document.getElementById('debug-msg');
+  const inner = document.getElementById('debug-msg-inner');
+  if (!el || !inner || _st) return; // skip if a transient status is showing
+
+  const segments = _buildStatusTicker();
+  if (segments.length <= 1) {
+    inner.textContent = segments[0];
+    inner.classList.remove('scrolling');
+    el.style.color = '';
+    return;
+  }
+
+  _tickerIndex = (_tickerIndex + 1) % segments.length;
+  const msg = segments[_tickerIndex];
+  inner.classList.remove('scrolling');
+  inner.style.paddingRight = '';
+  inner.textContent = msg;
+  el.style.color = _tickerIndex === 0 ? '' : 'var(--a)';
+
+  requestAnimationFrame(() => {
+    if (inner.scrollWidth > el.clientWidth) {
+      inner.style.paddingRight = '40px';
+      inner.textContent = msg + '      ' + msg;
+      inner.classList.add('scrolling');
+    }
+  });
+}
+
+function _startStatusTicker() {
+  clearInterval(_tickerInterval);
+  _tickerInterval = setInterval(_tickStatus, 3500);
+}
+
+function setStatus(msg, color) {
+  const el    = document.getElementById('debug-msg');
+  const inner = document.getElementById('debug-msg-inner');
+  if (!el || !inner) return;
+  inner.textContent = msg;
+  el.style.color = color || 'var(--a)';
+  // Scroll if text overflows — duplicate content for seamless loop
+  inner.classList.remove('scrolling');
+  inner.style.paddingRight = '';
+  requestAnimationFrame(() => {
+    if (inner.scrollWidth > el.clientWidth) {
+      inner.style.paddingRight = '40px';
+      inner.textContent = msg + '      ' + msg;
+      inner.classList.add('scrolling');
+    }
+  });
+  clearTimeout(_st);
+  _st = setTimeout(() => {
+    _st = null;
+    inner.classList.remove('scrolling');
+    inner.style.paddingRight = '';
+    const segments = _buildStatusTicker();
+    inner.textContent = segments[0];
+    el.style.color = '';
+  }, 2800);
 }
 /* ── Toast notifications ─────────────────────────────────── */
 let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
@@ -1232,7 +1329,7 @@ async function loadAppList() {
     exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 8000),
     exec(
       `cd ${RR_DIR} 2>/dev/null || exit 0; ` +
-      `for f in *.mode *.bright *.vol *.forcedark *.sat *.hvol_on *.screentimeout; do ` +
+      `for f in *.mode *.bright *.vol *.forcedark *.sat *.hvol_on; do ` +
       `  [ -f "$f" ] || continue; ` +
       `  echo "\${f%.*}"; ` +
       `done | sort -u`
@@ -2199,121 +2296,6 @@ function initUniversalVolume() {
   loadUniversalVolume();
 }
 
-/* ═══════════════════════════════════════════════════════════
-   UNIVERSAL SCREEN OFF TIMEOUT
-   Values mirror Android Settings → Display → Screen Timeout
-   Stored in /sdcard/GovThermal/config/screen_timeout.txt
-   Applied via: settings put system screen_off_timeout <ms>
-   Per-app stored in $RR_DIR/$pkg.screentimeout
-   ═══════════════════════════════════════════════════════════ */
-const SCREEN_TIMEOUT_FILE = `${CFG_DIR}/screen_timeout.txt`;
-const SCREEN_TIMEOUT_OPTS = [
-  { ms: 30000,   label: '30 SEC' },
-  { ms: 60000,   label: '1 MIN'  },
-  { ms: 120000,  label: '2 MIN'  },
-  { ms: 300000,  label: '5 MIN'  },
-  { ms: 600000,  label: '10 MIN' },
-  { ms: 1200000, label: '20 MIN' },
-];
-let _univScreenTimeoutMs = null;
-
-function _msToScreenLabel(ms) {
-  const opt = SCREEN_TIMEOUT_OPTS.find(o => o.ms === ms);
-  return opt ? opt.label : (ms > 0 ? `${Math.round(ms/60000)} MIN` : 'DEFAULT');
-}
-
-function _updateScreenTimeoutChips(containerId, activeMsOrNull) {
-  document.querySelectorAll(`#${containerId} .screentimeout-chip`).forEach(chip => {
-    const ms = parseInt(chip.dataset.ms);
-    chip.classList.toggle('screentimeout-chip--active',
-      activeMsOrNull !== null && ms === activeMsOrNull);
-  });
-}
-
-async function initUniversalScreenTimeout() {
-  const activeEl = document.getElementById('univ-screentimeout-active');
-  const applyBtn = document.getElementById('btn-screentimeout-apply');
-  const resetBtn = document.getElementById('btn-screentimeout-reset');
-
-  // ── Load + display current state ──────────────────────────
-  async function _loadState() {
-    const saved = (await exec(`cat ${SCREEN_TIMEOUT_FILE} 2>/dev/null`)).trim();
-    const savedMs = saved && !isNaN(parseInt(saved)) ? parseInt(saved) : null;
-    _univScreenTimeoutMs = savedMs;
-    if (activeEl) activeEl.textContent = savedMs ? _msToScreenLabel(savedMs) : '—';
-    _updateScreenTimeoutChips('univ-screentimeout-chips', savedMs);
-    // Sync selected state so APPLY button label is correct if reopened
-    if (applyBtn) {
-      if (savedMs) {
-        applyBtn.disabled = false;
-        applyBtn.textContent = `⏱ APPLY ${_msToScreenLabel(savedMs)} ›`;
-      } else {
-        applyBtn.disabled = true;
-        applyBtn.textContent = '⏱ SELECT A DURATION ›';
-      }
-    }
-    return savedMs;
-  }
-
-  // Reload every time the subpanel opens (so it's always fresh)
-  const subpanel = document.getElementById('univ-screen-timeout-section');
-  subpanel?.addEventListener('toggle', () => {
-    if (subpanel.open) _loadState();
-  }, { passive: true });
-
-  // Initial load
-  await _loadState();
-
-  // ── Track selected chip ────────────────────────────────────
-  // Use a module-level ref so Apply always uses the latest selection
-  let _selectedMs = _univScreenTimeoutMs;
-
-  document.getElementById('univ-screentimeout-chips')?.addEventListener('click', e => {
-    const chip = e.target.closest('.screentimeout-chip');
-    if (!chip) return;
-    _selectedMs = parseInt(chip.dataset.ms);
-    _updateScreenTimeoutChips('univ-screentimeout-chips', _selectedMs);
-    if (applyBtn) {
-      applyBtn.disabled = false;
-      applyBtn.textContent = `⏱ APPLY ${chip.dataset.label.toUpperCase()} ›`;
-    }
-  }, { passive: true });
-
-  // ── Apply ─────────────────────────────────────────────────
-  applyBtn?.addEventListener('click', async () => {
-    if (!_selectedMs || _selectedMs <= 0) {
-      showToast('Select a duration first', 'SCREEN TIMEOUT', 'info', '⏱');
-      return;
-    }
-    applyBtn.disabled = true;
-    applyBtn.textContent = '⏱ APPLYING…';
-    await exec(`settings put system screen_off_timeout ${_selectedMs} 2>/dev/null`);
-    await exec(`mkdir -p ${CFG_DIR} && echo "${_selectedMs}" > ${SCREEN_TIMEOUT_FILE}`);
-    _univScreenTimeoutMs = _selectedMs;
-    if (activeEl) activeEl.textContent = _msToScreenLabel(_selectedMs);
-    applyBtn.disabled = false;
-    applyBtn.textContent = `⏱ APPLY ${_msToScreenLabel(_selectedMs)} ›`;
-    showToast(`Screen timeout: ${_msToScreenLabel(_selectedMs)}`, 'SCREEN TIMEOUT', 'success', '⏱');
-    autoSave();
-  });
-
-  // ── Reset ─────────────────────────────────────────────────
-  resetBtn?.addEventListener('click', async () => {
-    await exec('settings put system screen_off_timeout 30000 2>/dev/null');
-    await exec(`rm -f ${SCREEN_TIMEOUT_FILE}`);
-    _univScreenTimeoutMs = null;
-    _selectedMs = null;
-    _updateScreenTimeoutChips('univ-screentimeout-chips', null);
-    if (activeEl) activeEl.textContent = '—';
-    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏱ SELECT A DURATION ›'; }
-    showToast('Screen timeout reset to system default', 'SCREEN TIMEOUT', 'info', '⏱');
-    autoSave();
-  });
-}
-
-/* ── Per-App Screen Timeout boot restore ── */
-/* (Applied by encore_app_daemon on foreground — see saveAllConfig boot script) */
-
 /* ── Universal slider fill sync — works for any <input type=range> ── */
 function updateBrightSliderFill(val) {
   const slider = document.getElementById('popup-bright-slider');
@@ -2415,8 +2397,7 @@ document.addEventListener('click', e => {
    ═══════════════════════════════════════════════════════════ */
 let cachedModes = null;
 // Tracks the values loaded when popup opens — used to detect if user changed anything
-let _popupInitial = { mode: '', bright: -1, vol: -1, fd: false, spare60: false, hvol_on: false, hvol_val: 7, screentimeout_ms: null };
-let _popupScreentimeoutMs = null;  // per-app screen timeout loaded for current popup
+let _popupInitial = { mode: '', bright: -1, vol: -1, fd: false, spare60: false, hvol_on: false, hvol_val: 7 };
 let _popupConnType = null;  // 'wifi' | 'data' | 'both' | null
 
 function _updatePopupConnUI(type) {
@@ -2744,14 +2725,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     }
   }
 
-  // Load per-app screen off timeout
-  {
-    const stRaw = (await exec(`cat ${RR_DIR}/${pkg}.screentimeout 2>/dev/null`)).trim();
-    _popupScreentimeoutMs = stRaw && !isNaN(parseInt(stRaw)) ? parseInt(stRaw) : null;
-    const stValEl = document.getElementById('popup-screentimeout-val');
-    if (stValEl) stValEl.textContent = _popupScreentimeoutMs ? _msToScreenLabel(_popupScreentimeoutMs) : 'DEFAULT';
-    _updateScreenTimeoutChips('popup-screentimeout-chips', _popupScreentimeoutMs);
-  }
 
   _popupInitial = {
     mode:            _initSel?.dataset.value || '',
@@ -2769,7 +2742,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     spare60:         _popupSpare60On,
     hvol_on:         _popupHvolOn,
     hvol_val:        _popupHvolVal,
-    screentimeout_ms: _popupScreentimeoutMs,
   };
   _popupConnType = connOnDisk;
 
@@ -2861,8 +2833,7 @@ async function applyRefreshLock() {
     curCacheOn   === _popupInitial.cache_on &&
     (document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true') === _popupInitial.spare60 &&
     (document.getElementById('popup-hvol-toggle')?.getAttribute('aria-pressed') === 'true') === _popupInitial.hvol_on &&
-    (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val &&
-    _popupScreentimeoutMs === _popupInitial.screentimeout_ms
+    (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val
   );
   if (nothingChanged) {
     closePopup();
@@ -3088,13 +3059,6 @@ async function applyRefreshLock() {
     } else {
       await exec(`rm -f ${RR_DIR}/${currentPkg}.hvol_on`);
     }
-  }
-
-  // Save per-app screen off timeout
-  if (_popupScreentimeoutMs && _popupScreentimeoutMs > 0) {
-    await exec(`mkdir -p ${RR_DIR} && echo '${_popupScreentimeoutMs}' > ${RR_DIR}/${currentPkg}.screentimeout`);
-  } else {
-    await exec(`rm -f ${RR_DIR}/${currentPkg}.screentimeout`);
   }
 
   setTimeout(closePopup, 500);
@@ -3403,7 +3367,6 @@ async function saveAllConfig(){
     '#!/system/bin/sh',
     '# Boot config restore — DavionEngine',
     `FREQ_FILE="${FREQ_FILE}"`,
-    `SCREEN_TIMEOUT_FILE="${SCREEN_TIMEOUT_FILE}"`,
     '',
     `echo "${prof}" > ${CFG_DIR}/active_profile`,
     '',
@@ -3478,9 +3441,6 @@ async function saveAllConfig(){
     `  fi`,
     `fi`,
     '',
-    '# 12. Screen off timeout restore',
-    `_st=$(cat "${SCREEN_TIMEOUT_FILE}" 2>/dev/null | tr -d ' \\n')`,
-    `[ -n "$_st" ] && [ "$_st" -gt 0 ] 2>/dev/null && settings put system screen_off_timeout "$_st" || true`,
   ].filter(l=>l!==null).join('\n');
 
   await exec(
@@ -3934,6 +3894,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
 
   initTheme();
   initFabSettings();
+  _startStatusTicker();
   _initAllSliderFills();
 
   // Set --header-h so sticky panel summaries sit flush under the sticky header
@@ -4006,7 +3967,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initZramManager();
   initUniversalBrightness();
   initUniversalVolume();
-  initUniversalScreenTimeout();
   initHeadsetConfig();
   initCoolMode();
   initCpuVoltOptimizer();
@@ -4107,16 +4067,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
     sl.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
-  // ── Per-app screen off timeout chips ─────────────────────────────────
-  document.getElementById('popup-screentimeout-chips')?.addEventListener('click', e => {
-    const chip = e.target.closest('.screentimeout-chip');
-    if (!chip) return;
-    const ms = parseInt(chip.dataset.ms);
-    // ms=0 means "DEFAULT" chip → clear the per-app override
-    _popupScreentimeoutMs = ms > 0 ? ms : null;
-    _updateScreenTimeoutChips('popup-screentimeout-chips', _popupScreentimeoutMs);
-    const valEl = document.getElementById('popup-screentimeout-val');
-    if (valEl) valEl.textContent = _popupScreentimeoutMs ? _msToScreenLabel(_popupScreentimeoutMs) : 'DEFAULT';  }, { passive: true });
   document.getElementById('popup-sat-slider')?.addEventListener('input', function() {
     const v = parseInt(this.value);
     const lbl = document.getElementById('popup-sat-val');
@@ -6509,12 +6459,6 @@ function initGlobalSearch() {
       action: () => scrollToPanel('cpu-gov-section', true) },
     { icon:'🖥', label:'GPU FREQUENCY',             sub:'GPU · Frequency Control',             badge:'SETTING',
       action: () => scrollToPanel('gpu-freq-section', true) },
-    { icon:'⏱', label:'SCREEN OFF TIMEOUT',        sub:'Universal RR → Screen Off Timeout',   badge:'SETTING',
-      action: () => scrollToPanel('rr-panel-section', true, 'univ-screen-timeout-section') },
-    { icon:'⏱', label:'SCREEN OFF 30 SECONDS',     sub:'Universal RR → Screen Off Timeout → 30s', badge:'SETTING',
-      action: () => scrollToPanel('rr-panel-section', true, 'univ-screen-timeout-section') },
-    { icon:'⏱', label:'SCREEN TIMEOUT PER-APP',    sub:'Per-App → App/Game Config popup',     badge:'SETTING',
-      action: () => scrollToPanel('perapp-rr-section', true) },
     { icon:'🎨', label:'THEME',                  sub:'Header → ⚙ Gear → Theme picker',   badge:'SETTING',
       action: () => _searchOpenTheme() },
     { icon:'🟡', label:'THEME VOLT',             sub:'Yellow-green accent', badge:'THEME',

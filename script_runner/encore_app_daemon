@@ -16,7 +16,6 @@ CFG_DIR="/sdcard/GovThermal/config"
 UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
 UNIVERSAL_BRIGHT_FILE="/sdcard/DAVION_ENGINE/universal_brightness.txt"
 UNIVERSAL_VOL_FILE="/sdcard/DAVION_ENGINE/universal_vol.txt"
-UNIVERSAL_SCREENTIMEOUT_FILE="$CFG_DIR/screen_timeout.txt"
 ENCORE_GAMELIST="/data/adb/.config/encore/gamelist.json"
 ENCORE_CFG="/data/adb/.config/encore/config.json"
 
@@ -381,46 +380,12 @@ restore_saturation() {
     _encore_last_sat_pkg=""
 }
 
-# ── Per-app screen off timeout ────────────────────────────────
-# Tracks the pkg whose screen timeout is currently overriding the universal.
-_screentimeout_active_pkg=""
-_st_last_fg_pkg=""   # dedicated fg tracker — fires only on real app change
-
 # ── Per-app Connection on Launch ──────────────────────────────
 # WiFi/Data are only enabled when currently OFF.
 # We track WHICH pkg enabled each so we only disable it when that app leaves.
 _conn_last_fg_pkg=""
 _conn_wifi_enabled_by=""   # pkg that turned WiFi ON; empty = we didn't touch it
 _conn_data_enabled_by=""   # pkg that turned Data ON;  empty = we didn't touch it
-
-apply_per_app_screentimeout() {
-    local pkg="$1"
-    local st_file="$RR_DIR/$pkg.screentimeout"
-    [ -f "$st_file" ] || return 1
-    local ms
-    ms=$(tr -d '[:space:]' < "$st_file")
-    [ -n "$ms" ] && [ "$ms" -gt 0 ] 2>/dev/null || return 1
-    settings put system screen_off_timeout "$ms" 2>/dev/null
-    _screentimeout_active_pkg="$pkg"
-    log_msg "  Screen timeout → ${ms}ms for $pkg"
-}
-
-restore_screentimeout() {
-    [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
-    _screentimeout_active_pkg=""
-    # Restore to universal lock if set, else leave system value untouched
-    if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
-        local ums
-        ums=$(tr -d '[:space:]' < "$UNIVERSAL_SCREENTIMEOUT_FILE")
-        if [ -n "$ums" ] && [ "$ums" -gt 0 ] 2>/dev/null; then
-            settings put system screen_off_timeout "$ums" 2>/dev/null
-            log_msg "  Screen timeout restored → ${ums}ms (universal)"
-            return
-        fi
-    fi
-    # No universal set — do NOT reset to 30s, leave Android's own setting intact
-    log_msg "  Screen timeout restore → skipped (no universal set, leaving system value)"
-}
 
 # ── Conn-on-Launch helpers ────────────────────────────────────
 
@@ -536,7 +501,6 @@ activate_tweaks() {
     apply_per_app_brightness "$pkg"
     apply_per_app_volume "$pkg"
     apply_per_app_saturation "$pkg"
-    apply_per_app_screentimeout "$pkg"
 
     # DND
     [ "$enable_dnd_val" = "true" ] && enable_dnd
@@ -575,7 +539,6 @@ deactivate_tweaks() {
     restore_brightness
     restore_volume
     restore_saturation
-    restore_screentimeout
 
     # DND
     disable_dnd
@@ -630,13 +593,6 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             _mid=$(tr -d '[:space:]' < "$_mf")
             [ -n "$_mid" ] && [ "$_mid" -eq "$_mid" ] 2>/dev/null && service call SurfaceFlinger 1035 i32 "$_mid" >/dev/null 2>&1
             log_msg "  RR(lc): mode $_mid for $pkg"
-        fi
-        # Screen Timeout
-        _sf="$RR_DIR/$pkg.screentimeout"
-        if [ -f "$_sf" ]; then
-            _sv=$(tr -d '[:space:]' < "$_sf")
-            [ -n "$_sv" ] && [ "$_sv" -gt 0 ] 2>/dev/null && settings put system screen_off_timeout "$_sv" 2>/dev/null
-            log_msg "  Timeout(lc): ${_sv}ms for $pkg"
         fi
         # Connection on Launch
         _cf="$RR_DIR/$pkg.conn"
@@ -726,21 +682,6 @@ while true; do
     # ── Write shared foreground pkg for headset_daemon ────────
     echo "$current_pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
 
-    # ── Per-app screen timeout — fires ONLY on real app change ──
-    # Uses _st_last_fg_pkg (not _active_pkg) so it doesn't fire every loop.
-    # Skips Encore-active apps — activate_tweaks/deactivate_tweaks handle those.
-    if [ "$current_pkg" != "$_st_last_fg_pkg" ]; then
-        _st_last_fg_pkg="$current_pkg"
-        # Only for non-Encore foreground apps
-        if [ "$current_pkg" != "$_active_pkg" ]; then
-            if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.screentimeout" ]; then
-                apply_per_app_screentimeout "$current_pkg"
-            elif [ -n "$_screentimeout_active_pkg" ]; then
-                restore_screentimeout
-            fi
-        fi
-    fi
-
     # ── Per-app Connection on Launch — fires ONLY on real app change ──
     # Rule: WiFi/Data is enabled ONLY if currently OFF.
     # If WiFi is already ON (enabled by another app or user), skip — don't touch it.
@@ -762,13 +703,13 @@ while true; do
         _ko_cc_last_pkg="$current_pkg"
         if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
             if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
-                if is_game_pkg "$current_pkg" || ko_global_enabled; then
+                if ko_global_enabled; then
                     kill_others_for_pkg "$current_pkg" &
                 fi
             fi
             if [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
                 [ -f "$RR_DIR/$current_pkg.cacheclear_list" ]; then
-                if is_game_pkg "$current_pkg" || cache_global_enabled; then
+                if cache_global_enabled; then
                     clear_cache_for_pkg "$current_pkg" &
                 fi
             fi

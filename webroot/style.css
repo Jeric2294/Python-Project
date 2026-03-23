@@ -150,7 +150,6 @@ body::before {
   max-width: 620px; margin: 0 auto;
   padding: 0 6px 80px;
   display: flex; flex-direction: column; gap: 6px;
-  /* NO contain:content — it traps position:fixed children */
   touch-action: pan-y;
   box-sizing: border-box;
   width: 100%;
@@ -306,14 +305,32 @@ body::before {
 .glow-label { /* legacy compat */ }
 
 /* ── Status ticker ── */
+@keyframes _status-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
 .status-bar {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 12px; background: var(--bg2);
-  border: 0.2px solid var(--border);
-  border-radius: var(--radius); overflow: hidden;
+  padding: 5px 12px;
+  background: var(--bg2);
+  border: 1px solid rgba(var(--a-rgb), 0.2);
+  border-radius: 10px;
+  overflow: hidden;
 }
-.status-bracket { color: var(--a); font-family: var(--mono); font-size: 12px; opacity: 0.45; }
-.status-text { font-size: 10px; letter-spacing: 0.10em; color: var(--dim); font-family: var(--mono); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-bracket { color: var(--a); font-family: var(--mono); font-size: 10px; opacity: 0.55; flex-shrink: 0; }
+.status-text {
+  font-size: 9.5px; letter-spacing: 0.10em; color: var(--dim);
+  font-family: var(--mono); flex: 1;
+  overflow: hidden; white-space: nowrap;
+  position: relative;
+}
+.status-text-inner {
+  display: inline-block;
+  white-space: nowrap;
+}
+.status-text-inner.scrolling {
+  animation: _status-scroll 10s linear infinite;
+}
 
 /* ═══════════════════════════════════════════════════════
    PANELS
@@ -470,6 +487,43 @@ details[open] > .adv-summary .adv-arrow-icon {
 
 /* Subpanel arrow size */
 .adv-details .adv-arrow-icon { width: 22px; height: 22px; }
+
+/* adv-summary base layout — fixes broken subpanels that lack inline display:flex */
+.adv-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  color: var(--text);
+  border-radius: var(--radius);
+  transition: background 0.2s;
+}
+.adv-summary::-webkit-details-marker { display: none; }
+.adv-summary:hover  { background: rgba(var(--a-rgb), 0.06); }
+.adv-summary:active { background: rgba(var(--a-rgb), 0.12); }
+
+/* adv-details card styling */
+.adv-details {
+  border: 0.5px solid rgba(var(--a-rgb), 0.14);
+  border-radius: var(--radius);
+  background: rgba(var(--a-rgb), 0.03);
+  transition: border-color 0.2s;
+  overflow: hidden;
+}
+.adv-details[open] {
+  border-color: rgba(var(--a-rgb), 0.28);
+}
+.adv-details[open] > .adv-summary {
+  border-bottom: 0.5px solid rgba(var(--a-rgb), 0.14);
+  color: var(--a);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
 .adv-inner { padding: 10px 14px 14px; }
 
 /* CPU Governor Profiles panel replaced old profile-card buttons */
@@ -1885,39 +1939,6 @@ details[open] #popup-idle60-delay-opts button:nth-child(5) { animation-delay: 0.
   font-size: 10px;
   color: var(--dim);
   letter-spacing: 0.08em;
-}
-
-/* ── Screen Off Timeout chips ───────────────────────────────── */
-.univ-screentimeout-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.screentimeout-chip {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 6px 12px;
-  background: var(--bg3);
-  border: 0.9px solid var(--border);
-  border-radius: 8px;
-  color: var(--dim);
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-.screentimeout-chip:hover {
-  border-color: var(--bdr);
-  color: var(--text);
-  background: var(--tint);
-}
-.screentimeout-chip.screentimeout-chip--active {
-  border-color: var(--a);
-  color: var(--a);
-  background: var(--tint-hi);
-  box-shadow: 0 0 0 1px rgba(var(--a-rgb), 0.2) inset;
 }
 
 /* ── History header label ── */

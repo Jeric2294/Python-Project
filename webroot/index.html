@@ -319,7 +319,7 @@
     <!-- Status ticker -->
     <div class="status-bar" id="main-status-bar">
       <span class="status-bracket">[</span>
-      <span id="debug-msg" class="status-text mono">SYS READY · MODULE ONLINE</span>
+      <span id="debug-msg" class="status-text mono"><span class="status-text-inner" id="debug-msg-inner">SYS READY · MODULE ONLINE</span></span>
       <span class="status-bracket">]</span>
     </div>
 
@@ -686,7 +686,7 @@
 
       <!-- Universal RR Lock -->
       <details class="adv-details rr-details">
-      <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+      <summary class="adv-summary mono">
         <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           UNIVERSAL REFRESH RATE LOCK
@@ -708,7 +708,7 @@
 
         <!-- ── Nested subpanel: 60Hz Drop ── -->
         <details class="adv-details rr-details" style="margin-top:8px;">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+        <summary class="adv-summary mono">
           <span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
             <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             AUTO 60HZ DROP
@@ -828,7 +828,7 @@
 
       <!-- Headset Configuration Subpanel -->
       <details class="adv-details rr-details" id="headset-config-section">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;gap:8px;">
+        <summary class="adv-summary mono">
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           HEADSET CONFIGURATION
           <span id="headset-status-badge" class="mono" style="font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--dim);margin-left:auto;">DETECTING…</span>
@@ -913,37 +913,6 @@
       </details>
 
       <!-- ── SUB-PANEL: Universal Screen Off Timeout ── -->
-      <details class="adv-details rr-details" id="univ-screen-timeout-section">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
-          <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-            <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-            SCREEN OFF TIMEOUT
-          </span>
-          <span id="univ-screentimeout-active" class="mono" style="font-size:9px;padding:2px 8px;border-radius:8px;background:rgba(var(--a-rgb),0.08);border:1px solid rgba(var(--a-rgb),0.22);color:var(--a);flex-shrink:0;margin-left:8px;">—</span>
-        </summary>
-        <div class="rr-universal-block" style="padding-top:6px;">
-          <div class="mono" style="font-size:9px;color:var(--dim);margin-bottom:10px;line-height:1.5;">
-            Sets the global Android screen off timeout · Same as Settings → Display → Screen Timeout
-          </div>
-          <!-- Timeout chips -->
-          <div class="univ-screentimeout-chips" id="univ-screentimeout-chips">
-            <button class="screentimeout-chip" data-ms="30000"  data-label="30 sec">30 SEC</button>
-            <button class="screentimeout-chip" data-ms="60000"  data-label="1 min">1 MIN</button>
-            <button class="screentimeout-chip" data-ms="120000" data-label="2 min">2 MIN</button>
-            <button class="screentimeout-chip" data-ms="300000" data-label="5 min">5 MIN</button>
-            <button class="screentimeout-chip" data-ms="600000" data-label="10 min">10 MIN</button>
-            <button class="screentimeout-chip" data-ms="1200000" data-label="20 min">20 MIN</button>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px;">
-            <button id="btn-screentimeout-apply" class="nexus-btn nexus-btn--full" disabled>⏱ SELECT A DURATION ›</button>
-            <button id="btn-screentimeout-reset" class="nexus-btn" style="flex-shrink:0;opacity:0.6;font-size:10px;padding:5px 10px;">RESET</button>
-          </div>
-          <div class="mono" style="font-size:9px;color:var(--dim);margin-top:6px;opacity:0.6;">
-            Reset restores system default (30s). Per-app timeout overrides this when an app is in foreground.
-          </div>
-        </div>
-      </details>
-
       </details>
     </section>
     <section class="nexus-panel" id="perapp-rr-section" data-pnum="06">
@@ -1062,7 +1031,7 @@
 
         <!-- Window Animation Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               WINDOW ANIMATION SCALE
@@ -1082,7 +1051,7 @@
 
         <!-- Transition Animation Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               TRANSITION ANIMATION SCALE
@@ -1102,7 +1071,7 @@
 
         <!-- Animator Duration Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               ANIMATOR DURATION SCALE
@@ -1319,7 +1288,7 @@
 
           <!-- ── TOGGLE 1: FRAME STABILITY ────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-frame-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🎯</span>
                 <div style="min-width:0;">
@@ -1364,7 +1333,7 @@
 
           <!-- ── TOGGLE 2: ANTI-THROTTLE BOOST ──────────────────── -->
           <details class="adv-details conn-bubble" id="feat-throttle-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🔥</span>
                 <div style="min-width:0;">
@@ -1411,7 +1380,7 @@
 
           <!-- ── TOGGLE 3: PYROX THERMAL ────────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-pyrox-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🔥</span>
                 <div style="min-width:0;">
@@ -1448,7 +1417,7 @@
 
           <!-- ── TOGGLE 5: COOL MODE ───────────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-cool-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">❄️</span>
                 <div style="min-width:0;">
@@ -1488,7 +1457,7 @@
 
           <!-- ── TOGGLE 4: CPU VOLTS OPTIMIZER ──────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-cpuvolt-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">⚡</span>
                 <div style="min-width:0;">
@@ -1686,26 +1655,6 @@
       </details>
 
       <!-- Per-App Screen Off Timeout -->
-      <details class="popup-block popup-collapsible" id="popup-screentimeout-block">
-        <summary class="popup-collapsible-summary">
-          <span class="mono popup-block-label">SCREEN OFF TIMEOUT</span>
-          <span class="popup-block-val" id="popup-screentimeout-val">DEFAULT</span>
-          <span class="popup-collapse-arrow">▾</span>
-        </summary>
-        <div class="popup-collapsible-body">
-          <div class="mono" style="font-size:8.5px;color:var(--dim);margin-bottom:8px;">Override screen timeout for this app only</div>
-          <div class="univ-screentimeout-chips" id="popup-screentimeout-chips">
-            <button class="screentimeout-chip" data-ms="30000"   data-label="30 sec">30 SEC</button>
-            <button class="screentimeout-chip" data-ms="60000"   data-label="1 min">1 MIN</button>
-            <button class="screentimeout-chip" data-ms="120000"  data-label="2 min">2 MIN</button>
-            <button class="screentimeout-chip" data-ms="300000"  data-label="5 min">5 MIN</button>
-            <button class="screentimeout-chip" data-ms="600000"  data-label="10 min">10 MIN</button>
-            <button class="screentimeout-chip" data-ms="1200000" data-label="20 min">20 MIN</button>
-            <button class="screentimeout-chip" data-ms="0"       data-label="Default">DEFAULT</button>
-          </div>
-        </div>
-      </details>
-
       <!-- Per-App Saturation Boost -->
       <details class="popup-block popup-sat-block popup-collapsible">
         <summary class="popup-collapsible-summary">
