@@ -3962,24 +3962,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
   history.pushState({ panelApp: true }, '');
   history.pushState({ panelApp: true }, '');
   window.addEventListener('popstate', e => {
-    // First, try to close any open nested subpanels (adv-details)
-    const openSubpanels = document.querySelectorAll('.adv-details[open]');
-    if (openSubpanels.length > 0) {
-      // Close all nested subpanels
-      openSubpanels.forEach(subpanel => {
-        subpanel.removeAttribute('open');
-      });
-      // Scroll back to top of the current panel
-      const openPanel = document.querySelector('.nexus-panel .panel-details[open]')?.closest('.nexus-panel');
-      if (openPanel) {
-        openPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      // Re-push so next back press can close the main panel
-      history.pushState({ panelApp: true }, '');
-      return;
-    }
-    
-    // If no subpanels open, close the main panel
     const openDetails = document.querySelector('.nexus-panel .panel-details[open]');
     if (openDetails) {
       openDetails.removeAttribute('open');
