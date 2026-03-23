@@ -522,6 +522,21 @@
           <button id="btn-unlock-gpu" class="nexus-btn" style="flex-shrink:0;padding:7px 14px;opacity:0.7;">UNLOCK</button>
         </div>
 
+        <!-- OPP Table -->
+        <div style="margin-top:14px;">
+          <div class="mono" style="font-size:9px;letter-spacing:0.16em;color:var(--dim);margin-bottom:6px;">OPP TABLE — TAP TO SELECT</div>
+          <div id="gpu-opp-table" style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;"></div>
+        </div>
+
+        <!-- Frequency History Graph -->
+        <div style="margin-top:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span class="mono" style="font-size:9px;letter-spacing:0.16em;color:var(--dim);">FREQ HISTORY · 30s</span>
+            <span class="mono" id="gpu-graph-peak" style="font-size:9px;color:var(--dim);"></span>
+          </div>
+          <canvas id="gpu-freq-graph" height="52" style="width:100%;border-radius:6px;background:rgba(var(--a-rgb),0.04);border:0.5px solid rgba(var(--a-rgb),0.12);display:block;"></canvas>
+        </div>
+
       </div>
       </details>
     </section>

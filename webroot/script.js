@@ -937,7 +937,12 @@ async function loadHeaderDeviceInfo() {
     const savedOpp = savedOppRaw.trim();
     if (savedOpp && !isNaN(parseInt(savedOpp)) && Object.keys(_gpuFreqMap).length > 0) {
       const lockedFreq = _gpuFreqMap[parseInt(savedOpp)];
-      if (lockedFreq !== undefined) gpuLabel = lockedFreq + ' MHz';
+      if (lockedFreq !== undefined) {
+        gpuLabel = lockedFreq + ' MHz';
+        // Push locked freq to graph too — graph should always update
+        const gpuPanel = document.getElementById('gpu-freq-section')?.querySelector('.panel-details');
+        if (gpuPanel?.open) _pushGpuFreqSample(lockedFreq);
+      }
     }
     // Fallback: live cur_freq from kernel
     if (!gpuLabel) {
@@ -946,6 +951,14 @@ async function loadHeaderDeviceInfo() {
         if      (gpuFreqVal > 1000000) gpuLabel = Math.round(gpuFreqVal / 1000000) + ' MHz';
         else if (gpuFreqVal > 1000)    gpuLabel = Math.round(gpuFreqVal / 1000) + ' MHz';
         else                           gpuLabel = gpuFreqVal + ' KHz';
+        // Push sample to history graph (only when panel is open to save resources)
+        const gpuPanel = document.getElementById('gpu-freq-section')?.querySelector('.panel-details');
+        if (gpuPanel?.open) {
+          const mhz = gpuFreqVal > 1000000 ? Math.round(gpuFreqVal / 1000000)
+                    : gpuFreqVal > 1000    ? Math.round(gpuFreqVal / 1000)
+                    : gpuFreqVal;
+          _pushGpuFreqSample(mhz);
+        }
       }
     }
     if (gpuDot) {
@@ -4980,6 +4993,7 @@ function _renderGpuUI(oppIndex, locked) {
 
 async function loadGpuPanel() {
   await _buildGpuFreqMap();
+  _renderOppTable();
 
   // Priority 1: saved file
   let oppIndex = 0;
@@ -4987,12 +5001,133 @@ async function loadGpuPanel() {
   if (saved && !isNaN(parseInt(saved))) {
     oppIndex = parseInt(saved);
     _renderGpuUI(oppIndex, true);
+    _highlightOppRow(oppIndex);
     return;
   }
   // Priority 2: kernel current
   const kernel = (await exec(`cat ${GPU_OPP_NODE} 2>/dev/null`)).trim();
   oppIndex = (!kernel || isNaN(parseInt(kernel))) ? 0 : parseInt(kernel);
   _renderGpuUI(oppIndex, false);
+  _highlightOppRow(oppIndex);
+}
+
+// ── OPP Table ─────────────────────────────────────────────────
+function _renderOppTable() {
+  const table = document.getElementById('gpu-opp-table');
+  if (!table) return;
+  const entries = Object.entries(_gpuFreqMap).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+  if (!entries.length) { table.innerHTML = '<span class="mono" style="font-size:9px;color:var(--dim);padding:6px;">OPP data unavailable</span>'; return; }
+  const maxFreq = Math.max(...entries.map(e => e[1]));
+  const minFreq = Math.min(...entries.map(e => e[1]));
+  table.innerHTML = entries.map(([idx, freq]) => {
+    const pct = maxFreq === minFreq ? 100 : Math.round((freq - minFreq) / (maxFreq - minFreq) * 100);
+    const isMax = parseInt(idx) === 0;
+    const isMin = parseInt(idx) === _gpuOppMax;
+    return `<div class="gpu-opp-row" data-opp="${idx}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;border:0.5px solid transparent;transition:background 0.15s,border-color 0.15s;">
+      <span class="mono" style="font-size:9px;color:var(--dim);width:36px;flex-shrink:0;">OPP ${idx}</span>
+      <div style="flex:1;height:4px;border-radius:2px;background:rgba(var(--a-rgb),0.1);overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:var(--a);border-radius:2px;transition:width 0.3s;"></div>
+      </div>
+      <span class="mono" style="font-size:10px;color:var(--a);width:56px;text-align:right;flex-shrink:0;">${freq} MHz${isMax ? ' ▲' : isMin ? ' ▼' : ''}</span>
+    </div>`;
+  }).join('');
+  table.querySelectorAll('.gpu-opp-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const opp = parseInt(row.dataset.opp);
+      const slider = document.getElementById('gpu-opp-slider');
+      if (slider) {
+        slider.value = _gpuOppMax - opp;
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        _syncSliderFill(slider);
+      }
+      _highlightOppRow(opp);
+    }, { passive: true });
+  });
+}
+
+function _highlightOppRow(oppIndex) {
+  document.querySelectorAll('.gpu-opp-row').forEach(r => {
+    const active = parseInt(r.dataset.opp) === oppIndex;
+    r.style.background = active ? 'rgba(var(--a-rgb),0.10)' : '';
+    r.style.borderColor = active ? 'rgba(var(--a-rgb),0.35)' : 'transparent';
+  });
+}
+
+// ── Frequency History Graph ────────────────────────────────────
+const _gpuFreqHistory = [];   // { ts, mhz }
+const GPU_HISTORY_WINDOW = 30000;  // 30s
+
+function _pushGpuFreqSample(mhz) {
+  const now = Date.now();
+  _gpuFreqHistory.push({ ts: now, mhz });
+  // Trim old samples outside window
+  const cutoff = now - GPU_HISTORY_WINDOW;
+  while (_gpuFreqHistory.length && _gpuFreqHistory[0].ts < cutoff) _gpuFreqHistory.shift();
+  // Use rAF so canvas has correct offsetWidth if panel just opened
+  requestAnimationFrame(_drawGpuGraph);
+}
+
+function _drawGpuGraph() {
+  const canvas = document.getElementById('gpu-freq-graph');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Match canvas pixel size to display size
+  const W = canvas.offsetWidth || 300;
+  const H = canvas.offsetHeight || 52;
+  canvas.width  = W;
+  canvas.height = H;
+  ctx.clearRect(0, 0, W, H);
+
+  if (_gpuFreqHistory.length < 2) {
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Collecting data…', W / 2, H / 2 + 4);
+    return;
+  }
+
+  const now   = Date.now();
+  const freqs = _gpuFreqHistory.map(s => s.mhz);
+  const maxF  = Math.max(...freqs, 1);
+  const minF  = Math.min(...freqs);
+  const range = maxF - minF || 1;
+
+  // Get theme accent color from CSS variable
+  const accentRaw = getComputedStyle(document.documentElement).getPropertyValue('--a').trim() || '#7fff00';
+
+  // Draw gradient fill under line
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, accentRaw.startsWith('#') ? accentRaw + '55' : 'rgba(127,255,0,0.33)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  _gpuFreqHistory.forEach((s, i) => {
+    const x = ((s.ts - (now - GPU_HISTORY_WINDOW)) / GPU_HISTORY_WINDOW) * W;
+    const y = H - ((s.mhz - minF) / range) * (H - 8) - 4;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  // Close fill path to bottom
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw line
+  ctx.beginPath();
+  _gpuFreqHistory.forEach((s, i) => {
+    const x = ((s.ts - (now - GPU_HISTORY_WINDOW)) / GPU_HISTORY_WINDOW) * W;
+    const y = H - ((s.mhz - minF) / range) * (H - 8) - 4;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = accentRaw;
+  ctx.lineWidth   = 1.5;
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+
+  // Peak label
+  const peakEl = document.getElementById('gpu-graph-peak');
+  if (peakEl) peakEl.textContent = `PEAK ${maxF} MHz`;
 }
 
 async function applyGpuLock() {
@@ -5018,8 +5153,8 @@ async function applyGpuLock() {
   await exec(`su -c "chmod 664 /sys/kernel/ged/hal/dcs_mode 2>/dev/null && echo 0 > /sys/kernel/ged/hal/dcs_mode" 2>/dev/null`);
 
   _renderGpuUI(oppIndex, true);
+  _highlightOppRow(oppIndex);
   const freq = _gpuFreqLabel(oppIndex);
-  setStatus(`⚡ GPU locked → ${freq} (OPP ${oppIndex}, GED upbound set)`);
   showToast(`GPU locked at ${freq}`, 'GPU FREQ', 'success', '⚡');
 
   // Update HDI strip immediately
@@ -5047,6 +5182,7 @@ async function unlockGpu() {
   const cur = (await exec(`cat ${GPU_OPP_NODE} 2>/dev/null`)).trim();
   const idx  = (!cur || isNaN(parseInt(cur)) || parseInt(cur) === -1) ? 0 : parseInt(cur);
   _renderGpuUI(idx, false);
+  _highlightOppRow(-1); // clear all highlights on unlock
   setStatus('GPU unlocked — driver controls frequency');
   showToast('GPU unlocked', 'GPU FREQ', 'info', '🔓');
   autoSave();
