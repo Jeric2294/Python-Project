@@ -164,110 +164,13 @@ apply_zip() {
 
     log_msg "Applied: $applied files, Failed: $failed files"
 
-    # ── Restart affected services ─────────────────────────────
-    local restarted=""
-
-    if [ "$_needs_httpd" = "1" ]; then
-        pkill -f "httpd.*8080" 2>/dev/null
-        sleep 1
-        "$BB" httpd -p 8080 \
-            -h "$MODDIR/webroot" \
-            -c "$MODDIR/httpd.conf" \
-            >> "$LOG" 2>&1 &
-        restarted="$restarted WebUI"
-        log_msg "  Restarted: httpd"
-    fi
-
-    if [ "$_needs_encore" = "1" ]; then
-        pkill -f "encore_app_daemon" 2>/dev/null
-        sleep 1
-        sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
-        restarted="$restarted Encore"
-        log_msg "  Restarted: encore_app_daemon"
-    fi
-
-    if [ "$_needs_logcat" = "1" ]; then
-        pkill -f "GovThermal.*logcat" 2>/dev/null
-        pkill -f "GovThermal.*dumpsys2" 2>/dev/null
-        sleep 0.5
-        chmod 755 "$MODDIR/logcat_detection/logcat" 2>/dev/null
-        nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
-        restarted="$restarted Logcat"
-        log_msg "  Restarted: logcat"
-    fi
-
-    if [ "$_needs_rr_guard" = "1" ]; then
-        pkill -f "rr_guard" 2>/dev/null
-        sleep 0.5
-        sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
-        restarted="$restarted RRGuard"
-        log_msg "  Restarted: rr_guard"
-    fi
-
-    if [ "$_needs_idle60" = "1" ]; then
-        pkill -f "idle60_daemon" 2>/dev/null
-        sleep 0.5
-        sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
-        restarted="$restarted Idle60"
-        log_msg "  Restarted: idle60_daemon"
-    fi
-
-    if [ "$_needs_battery_guard" = "1" ]; then
-        pkill -f "battery_guard" 2>/dev/null
-        sleep 0.5
-        sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
-        restarted="$restarted BattGuard"
-        log_msg "  Restarted: battery_guard"
-    fi
-
-    if [ "$_needs_headset" = "1" ]; then
-        pkill -f "headset_daemon" 2>/dev/null
-        sleep 0.5
-        sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
-        restarted="$restarted Headset"
-        log_msg "  Restarted: headset_daemon"
-    fi
-
-    if [ "$_needs_otg" = "1" ]; then
-        pkill -f "otg_daemon" 2>/dev/null
-        sleep 0.5
-        nohup sh "$MODDIR/script_runner/otg_daemon" >> "$LOG" 2>&1 &
-        restarted="$restarted OTG"
-        log_msg "  Restarted: otg_daemon"
-    fi
-
-    if [ "$_needs_thermal_wdog" = "1" ]; then
-        pkill -f "thermal_watchdog" 2>/dev/null
-        sleep 0.5
-        nohup sh "$MODDIR/script_runner/thermal_watchdog" >> "$LOG" 2>&1 &
-        restarted="$restarted ThermalWdog"
-        log_msg "  Restarted: thermal_watchdog"
-    fi
-
-    if [ "$_needs_ai" = "1" ]; then
-        pkill -f "ai_thermal_predict" 2>/dev/null
-        pkill -f "ai_adaptive_freq" 2>/dev/null
-        pkill -f "ai_app_classifier" 2>/dev/null
-        sleep 0.5
-        nohup sh "$MODDIR/script_runner/ai_thermal_predict" >> "$LOG" 2>&1 &
-        nohup sh "$MODDIR/script_runner/ai_adaptive_freq" >> "$LOG" 2>&1 &
-        nohup sh "$MODDIR/script_runner/ai_app_classifier" >> "$LOG" 2>&1 &
-        restarted="$restarted AI"
-        log_msg "  Restarted: AI daemons"
-    fi
-
-    if [ "$_needs_hot_reload" = "1" ]; then
-        pkill -f "hot_reload_daemon" 2>/dev/null
-        sleep 0.5
-        nohup sh "$MODDIR/script_runner/hot_reload_daemon" >> "$LOG" 2>&1 &
-        restarted="$restarted HotReload"
-        log_msg "  Restarted: hot_reload_daemon"
-    fi
+    # ── Apply changes and restart services ─────────────────────────
+    log_msg "Applying changes via de_reload..."
+    sh "$MODDIR/script_runner/de_reload" >> "$LOG" 2>&1
 
     # ── Done notification ─────────────────────────────────────
     if [ "$failed" = "0" ]; then
-        local msg="${applied} files applied"
-        [ -n "$restarted" ] && msg="$msg ·${restarted} restarted"
+        local msg="${applied} files applied and effects active"
         notify "$msg" "success"
         log_msg "Hot Reload SUCCESS: $zip_name"
     else

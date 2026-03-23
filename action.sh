@@ -111,20 +111,12 @@ find "$MODDIR/logcat_detection" -type f -exec chmod +x {} \; 2>/dev/null
 find "$MODDIR/webroot/cgi-bin" -type f -exec chmod +x {} \; 2>/dev/null
 chmod +x "$MODDIR/busybox" 2>/dev/null
 
-# ── RESTART WEBUI ────────────────────────────────────────────
+# ── APPLY CHANGES ────────────────────────────────────────────
 if [ "$updated" -gt 0 ]; then
-    ui_print "⚙ Restarting WebUI..."
-    pkill -f "httpd.*8080" 2>/dev/null
-    pkill -f "busybox.*8080" 2>/dev/null
-    sleep 1
-    "$BB" httpd \
-        -p 8080 \
-        -h "$MODDIR/webroot" \
-        -c "$MODDIR/httpd.conf" \
-        >>"$LOG" 2>&1 &
-    sleep 1
-    ui_print "✔ WebUI restarted"
-    log "httpd restarted"
+    ui_print "⚙ Applying changes..."
+    sh "$MODDIR/script_runner/de_reload" >>"$LOG" 2>&1
+    ui_print "✔ Changes applied successfully"
+    log "de_reload executed"
 fi
 
 # ── CLEANUP ──────────────────────────────────────────────────
