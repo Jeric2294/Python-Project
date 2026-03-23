@@ -1107,6 +1107,30 @@ async function loadHeaderDeviceInfo() {
     const gs  = gov === 'PERFORMANCE' ? 'hot' : gov === 'POWERSAVE' ? 'warn' : 'ok';
     _hdi('hsi-ctrl', gov, gs);
 
+    // TEMP tile
+    const tempVal = parseInt(tempRaw.trim());
+    if (!isNaN(tempVal) && tempVal > 0) {
+      const tempC = tempVal > 1000 ? Math.round(tempVal / 100) / 10 : tempVal;
+      const tempState = tempC >= 45 ? 'hot' : tempC >= 38 ? 'warn' : 'ok';
+      _hdi('hsi-temp', `${Math.round(tempC)}°C`, tempState);
+    }
+
+    // FREQ LIM tile
+    const freqLim = parseInt(freqLimitRaw.trim());
+    if (!isNaN(freqLim) && freqLim > 0 && freqLim !== 100) {
+      _hdi('hsi-freqlim', `${freqLim}%`, freqLim < 80 ? 'warn' : 'ok');
+    } else {
+      _hdi('hsi-freqlim', '100%', 'ok');
+    }
+
+    // I/O scheduler tile
+    const ioRaw = await exec(
+      'cat /sys/block/mmcblk0/queue/scheduler 2>/dev/null || ' +
+      'cat /sys/block/sda/queue/scheduler 2>/dev/null || echo "—"'
+    );
+    const ioMatch = ioRaw.match(/\[([^\]]+)\]/);
+    _hdi('hsi-io', ioMatch ? ioMatch[1].toUpperCase() : (ioRaw.trim().split('\n')[0] || '—'), 'ok');
+
   } catch(e) { /* silent */ }
 }
 
@@ -3934,17 +3958,20 @@ document.addEventListener('DOMContentLoaded',async()=>{
   _startStatusTicker();
 
   // ── Android back button — close open panel instead of navigating away ──
+  // Push 2 states: one sentinel + one buffer so popstate always fires before exit
+  history.pushState({ panelApp: true }, '');
   history.pushState({ panelApp: true }, '');
   window.addEventListener('popstate', e => {
     const openDetails = document.querySelector('.nexus-panel .panel-details[open]');
     if (openDetails) {
       openDetails.removeAttribute('open');
       _applyPanelFocus();
-      // Re-push state so back button works again for the next panel
+      // Re-push so next back press still triggers popstate
       history.pushState({ panelApp: true }, '');
     } else {
-      // No panel open — let the back button work normally (exit WebView)
-      history.back();
+      // All panels closed — push again to prevent accidental WebView exit
+      // User needs to press back twice with no panels open to exit
+      history.pushState({ panelApp: true }, '');
     }
   });
   _initAllSliderFills();

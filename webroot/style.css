@@ -282,11 +282,14 @@ body::before {
   display: flex; align-items: stretch;
   background: var(--bg2); border: 0.4px solid var(--border);
   border-top: none; border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.hdi-strip::-webkit-scrollbar { display: none; }
 .hdi-tile {
   display: flex; align-items: center; gap: 5px;
-  padding: 7px 7px; flex: 1; min-width: 0;
+  padding: 7px 10px; flex-shrink: 0; min-width: 72px;
 }
 .hdi-icon { font-size: 10px; opacity: 0.38; flex-shrink: 0; }
 .hdi-status-dot {
