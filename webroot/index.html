@@ -74,10 +74,7 @@
                   <span class="fab-menu-icon" id="fab-ko-icon">⏹</span>
                   <span class="fab-menu-label mono" id="fab-ko-label">KILL OTHERS ON</span>
                 </button>
-                <button class="fab-menu-item" id="fab-menu-cache" aria-pressed="true">
-                  <span class="fab-menu-icon" id="fab-cache-icon">🗑</span>
-                  <span class="fab-menu-label mono" id="fab-cache-label">CLEAR CACHE ON</span>
-                </button>
+
                 <div class="fab-menu-divider"></div>
                 <button class="fab-menu-item fab-menu-exit" id="fab-menu-exit">
                   <span class="fab-menu-icon">
@@ -1510,13 +1507,13 @@
 
 
     <!-- ── PANEL 12: CLEAR APP CACHE ─────────────────────────── -->
-    <section class="nexus-panel" id="clear-cache-section" data-pnum="12" style="display:none;" data-hidden-by-toggle="1">
+    <section class="nexus-panel" id="clear-cache-section" data-pnum="12">
       <details class="panel-details" id="clear-cache-panel">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🗑</div>
           <div class="panel-title-wrap">
             <div class="panel-title">CLEAR APP CACHE</div>
-            <div class="panel-subtitle">Auto-clear cache on app launch</div>
+            <div class="panel-subtitle">Spare apps from auto-clear · Manual clear</div>
           </div>
           <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -1533,7 +1530,7 @@
               oninput="_filterCacheApps(this.value)">
           </div>
 
-          <!-- Tabs -->
+          <!-- Tabs: Spared + All user apps (system excluded from auto-clear) -->
           <div class="app-tab-bar" role="tablist" style="margin-bottom:2px;">
             <button class="app-tab" id="cache-panel-tab-spared" data-cachetab2="spared" role="tab" aria-selected="false">
               <span class="mono">🛡 SPARED</span>
@@ -1543,18 +1540,13 @@
               <span class="mono">📱 USER</span>
               <span class="app-tab-count mono" id="cache-panel-count-user">—</span>
             </button>
-            <button class="app-tab" id="cache-panel-tab-system" data-cachetab2="system" role="tab" aria-selected="false">
-              <span class="mono">⚙ SYSTEM</span>
-              <span class="app-tab-count mono" id="cache-panel-count-system">—</span>
-            </button>
           </div>
 
-          <!-- Action buttons -->
+          <!-- Action button: clear all user app caches except spared -->
           <div style="display:flex;gap:8px;">
-            <button class="nexus-btn" onclick="_selectAllCacheApps()" style="flex:1;padding:8px;font-size:10px;">SELECT ALL</button>
-            <button class="nexus-btn" onclick="_clearSelectedCache()" id="btn-clear-cache"
+            <button class="nexus-btn" onclick="_clearAllExceptSpared()" id="btn-clear-cache"
               style="flex:1;padding:8px;font-size:10px;background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.5);color:#f87171;">
-              🗑 CLEAR SELECTED
+              🗑 CLEAR CACHE
             </button>
           </div>
 
@@ -1562,7 +1554,7 @@
           <div id="cache-clear-status" class="mono" style="font-size:9px;color:var(--dim);display:none;padding:6px 10px;background:rgba(var(--a-rgb),0.06);border-radius:6px;"></div>
 
           <!-- App list -->
-          <div id="cache-app-list" style="display:flex;flex-direction:column;gap:4px;">
+          <div id="cache-app-list" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto;">
             <div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">
               Loading apps…
             </div>
@@ -1799,19 +1791,7 @@
         </div>
       </div>
 
-      <!-- Cache Clear On Launch -->
-      <div class="popup-block" id="popup-cache-block">
-        <div class="popup-encore-row">
-          <div class="popup-encore-info">
-            <span class="mono popup-block-label">🗑 CLEAR CACHE ON LAUNCH</span>
-            <span class="popup-encore-sub mono">Triggers CLEAR SELECTED in Cache Manager on launch</span>
-          </div>
-          <button id="popup-cache-btn" class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" aria-pressed="false">
-            <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
-            <span class="popup-toggle-label mono" id="popup-cache-label">OFF</span>
-          </button>
-        </div>
-      </div>
+
 
       </div><!-- /popup-scroll-body -->
     </div>
@@ -1820,7 +1800,7 @@
 
 
   <!-- ═══ CACHE CLEAR POPUP ═══ -->
-  <div id="cache-clear-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Cache Clear on Launch" style="display:none;">
+    <div id="cache-clear-popup" class="app-config-bubble-overlay" role="dialog" aria-modal="true" aria-label="Cache Clear on Launch" style="display:none;">
     <div class="app-config-bubble ko-spare-popup-card">
       <!-- Header -->
       <div class="app-config-bubble-header">
@@ -1834,9 +1814,9 @@
 
       <!-- Toggle -->
       <div class="popup-block" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin-bottom:6px;">
-        <div>
+        <div style="flex:1;min-width:0;">
           <div class="mono" style="font-size:10px;color:#f87171;letter-spacing:0.05em;">CLEAR ALL USER APP CACHES ON LAUNCH</div>
-          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">0 apps spared</div>
+          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">Clears all user app caches on launch</div>
         </div>
         <button class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" id="cache-popup-toggle" aria-pressed="false">
           <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
@@ -1852,7 +1832,7 @@
         <button id="cache-popup-search-clear" class="search-clear" aria-label="Clear" hidden>✕</button>
       </div>
 
-      <!-- Tabs: Spared + All user apps only (system tab removed) -->
+      <!-- Tabs -->
       <div class="app-tab-bar" role="tablist" style="margin-bottom:6px;">
         <button class="app-tab" id="cache-popup-tab-spared" data-cachetab="spared" role="tab" aria-selected="false">
           <span class="mono">🛡 SPARED</span>
@@ -1867,8 +1847,15 @@
       <!-- App list -->
       <div id="cache-popup-list" class="app-list ko-popup-list-flex"></div>
 
+      <!-- Clear Cache now (manual trigger — same as auto-launch behavior) -->
+      <button id="cache-popup-clear-now" class="nexus-btn nexus-btn--full"
+        style="margin-top:6px;background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.5);color:#f87171;"
+        onclick="_cacheClearNow()">
+        🗑 CLEAR CACHE
+      </button>
+
       <!-- Done -->
-      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:10px;">✓ DONE</button>
+      <button id="cache-popup-done" class="nexus-btn nexus-btn--full" style="margin-top:6px;">✓ DONE</button>
     </div>
   </div>
 
