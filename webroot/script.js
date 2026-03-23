@@ -298,7 +298,7 @@ function initFabSettings(){
     if (icon)    icon.textContent  = on ? '⏹' : '○';
     if (label)   label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
     if (item)    item.style.opacity = on ? '1' : '0.5';
-    if (section) section.style.display = on ? '' : 'none';
+    if (section) { section.dataset.hiddenByToggle = on ? '' : '1'; section.style.display = on ? '' : 'none'; }
   }
 
   function _syncCacheMenuItem(on) {
@@ -310,7 +310,7 @@ function initFabSettings(){
     if (icon)    icon.textContent  = on ? '🗑' : '○';
     if (label)   label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
     if (item)    item.style.opacity = on ? '1' : '0.5';
-    if (section) section.style.display = on ? '' : 'none';
+    if (section) { section.dataset.hiddenByToggle = on ? '' : '1'; section.style.display = on ? '' : 'none'; }
   }
 
   function _syncToastMenuItem(on) {
@@ -3964,6 +3964,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const openPanel = document.querySelector('.nexus-panel .panel-details[open]')?.closest('.nexus-panel');
     const statusBar = document.getElementById('main-status-bar');
     document.querySelectorAll('.nexus-panel').forEach(p => {
+      if (p.dataset.hiddenByToggle === '1') return; // skip panels hidden by gear toggle
       if (openPanel) {
         p.style.display = (p === openPanel) ? '' : 'none';
       } else {
