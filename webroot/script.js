@@ -273,6 +273,42 @@ function initFabSettings(){
     }
   });
 
+  // ── Restore KO global toggle state from disk ──────────────
+  exec(`cat ${KO_GLOBAL_CFG_FILE} 2>/dev/null`).then(raw => {
+    if (raw.trim() === '0') {
+      _koGlobalEnabled = false;
+      _syncKoMenuItem(false);
+    }
+  });
+
+  // ── Restore Cache global toggle state from disk ────────────
+  exec(`cat ${CACHE_GLOBAL_CFG_FILE} 2>/dev/null`).then(raw => {
+    if (raw.trim() === '0') {
+      _cacheGlobalEnabled = false;
+      _syncCacheMenuItem(false);
+    }
+  });
+
+  function _syncKoMenuItem(on) {
+    const icon  = document.getElementById('fab-ko-icon');
+    const label = document.getElementById('fab-ko-label');
+    const item  = document.getElementById('fab-menu-ko');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (icon)  icon.textContent  = on ? '⏹' : '○';
+    if (label) label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
+  }
+
+  function _syncCacheMenuItem(on) {
+    const icon  = document.getElementById('fab-cache-icon');
+    const label = document.getElementById('fab-cache-label');
+    const item  = document.getElementById('fab-menu-cache');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (icon)  icon.textContent  = on ? '🗑' : '○';
+    if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
+  }
+
   function _syncToastMenuItem(on) {
     const icon  = document.getElementById('fab-toast-icon');
     const label = document.getElementById('fab-toast-label');
@@ -339,6 +375,34 @@ function initFabSettings(){
     }
   });
 
+  document.getElementById('fab-menu-ko')?.addEventListener('click', async e => {
+    e.stopPropagation();
+    closeAll();
+    _koGlobalEnabled = !_koGlobalEnabled;
+    _syncKoMenuItem(_koGlobalEnabled);
+    await exec(`mkdir -p ${CFG_DIR} && echo '${_koGlobalEnabled ? '1' : '0'}' > ${KO_GLOBAL_CFG_FILE}`);
+    showToast(
+      _koGlobalEnabled ? 'Kill Others on Launch enabled' : 'Kill Others on Launch disabled',
+      'KILL OTHERS',
+      _koGlobalEnabled ? 'success' : 'info',
+      _koGlobalEnabled ? '⏹' : '○'
+    );
+  });
+
+  document.getElementById('fab-menu-cache')?.addEventListener('click', async e => {
+    e.stopPropagation();
+    closeAll();
+    _cacheGlobalEnabled = !_cacheGlobalEnabled;
+    _syncCacheMenuItem(_cacheGlobalEnabled);
+    await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
+    showToast(
+      _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
+      'CLEAR CACHE',
+      _cacheGlobalEnabled ? 'success' : 'info',
+      _cacheGlobalEnabled ? '🗑' : '○'
+    );
+  });
+
   menuExit.addEventListener("click", async e=>{
     e.stopPropagation();
     closeAll();
@@ -377,6 +441,12 @@ function setStatus(msg,color){
 /* ── Toast notifications ─────────────────────────────────── */
 let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
 const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
+
+let _koGlobalEnabled = true;  // controlled by gear icon toggle; persisted to disk
+const KO_GLOBAL_CFG_FILE = `${CFG_DIR}/ko_global_enabled`;
+
+let _cacheGlobalEnabled = true;  // controlled by gear icon toggle; persisted to disk
+const CACHE_GLOBAL_CFG_FILE = `${CFG_DIR}/cache_global_enabled`;
 
 function showToast(msg, title='', type='success', icon='', dur=2800) {
   if (!_toastEnabled) return;
@@ -2374,11 +2444,17 @@ async function openPopup(pkg, gearElement, isGame = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = isGame ? '' : 'none';
   });
-  // Kill Others + Connection on Launch + Cache Clear — show for BOTH apps and games
-  ['popup-ko-block', 'popup-conn-block', 'popup-cache-block'].forEach(id => {
+  // Connection on Launch + Cache Clear — show for BOTH apps and games
+  ['popup-conn-block'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = '';
   });
+  // Kill Others — only show if globally enabled via gear toggle
+  const _koBlockEl = document.getElementById('popup-ko-block');
+  if (_koBlockEl) _koBlockEl.style.display = _koGlobalEnabled ? '' : 'none';
+  // Clear Cache — only show if globally enabled via gear toggle
+  const _cacheBlockEl = document.getElementById('popup-cache-block');
+  if (_cacheBlockEl) _cacheBlockEl.style.display = _cacheGlobalEnabled ? '' : 'none';
 
 
 
