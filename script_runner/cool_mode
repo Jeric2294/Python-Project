@@ -165,6 +165,94 @@ tune_mcdi() {
     fi
 }
 
+
+# ── 7. FPSGO Thermal Limiter ──────────────────────────────────
+tune_fpsgo_thermal() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Disable FPSGO thermal throttle — prevents FPS drops due to heat
+        # Confirmed paths from thermal_toggle (fbt/thrm_enable, fbt/thrm_limit_cpu)
+        de_write 0 /sys/kernel/fpsgo/fbt/thrm_enable
+        de_write 0 /sys/kernel/fpsgo/fbt/thrm_limit_cpu
+        de_write 0 /sys/kernel/fpsgo/fbt/thrm_limit_fp
+        log_msg "FPSGO: thermal limiter disabled"
+    else
+        # Restore defaults
+        de_write 1 /sys/kernel/fpsgo/fbt/thrm_enable
+        chmod 644 /sys/kernel/fpsgo/fbt/thrm_limit_cpu 2>/dev/null
+        chmod 644 /sys/kernel/fpsgo/fbt/thrm_limit_fp  2>/dev/null
+        log_msg "FPSGO: thermal limiter restored"
+    fi
+}
+
+# ── 8. PPM THERMAL Policy Disable ────────────────────────────
+tune_ppm_thermal() {
+    local enable="$1"
+    if [ -d /proc/ppm ]; then
+        if [ "$enable" = "1" ]; then
+            # Disable THERMAL policy only (not PWR_THRO — too aggressive)
+            # Confirmed path from thermal_toggle and de_cpu_engine
+            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[[0-9]+" | tr -d "["); do
+                de_write "$idx 0" /proc/ppm/policy_status
+            done
+            log_msg "PPM: THERMAL policy disabled"
+        else
+            # Re-enable THERMAL policy
+            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[[0-9]+" | tr -d "["); do
+                de_write "$idx 1" /proc/ppm/policy_status
+            done
+            log_msg "PPM: THERMAL policy restored"
+        fi
+    else
+        log_msg "PPM: /proc/ppm not found — skipping"
+    fi
+}
+
+# ── 9. Thermal Message CPU Limits Reset ──────────────────────
+tune_thermal_msg() {
+    local enable="$1"
+    local cpu_limits="/sys/devices/virtual/thermal/thermal_message/cpu_limits"
+    if [ "$enable" = "1" ]; then
+        # Lift kernel-imposed CPU freq ceiling per core
+        # Confirmed path from thermal_toggle step 6
+        if [ -f "$cpu_limits" ]; then
+            for i in 0 1 2 3 4 5 6 7; do
+                local maxfreq
+                maxfreq=$(cat /sys/devices/system/cpu/cpu${i}/cpufreq/cpuinfo_max_freq 2>/dev/null)
+                [ -n "$maxfreq" ] && [ "$maxfreq" -gt 0 ] 2>/dev/null &&                     de_write "cpu${i} ${maxfreq}" "$cpu_limits"
+            done
+            log_msg "Thermal msg: CPU limits lifted to max freq"
+        else
+            log_msg "Thermal msg: cpu_limits node not found — skipping"
+        fi
+    else
+        # Restore — write 0 to let kernel re-impose its own limits
+        if [ -f "$cpu_limits" ]; then
+            for i in 0 1 2 3 4 5 6 7; do
+                de_write "cpu${i} 0" "$cpu_limits" 2>/dev/null
+            done
+            log_msg "Thermal msg: CPU limits restored"
+        fi
+    fi
+}
+
+# ── 10. GED GPU Boost Duration Reduction ─────────────────────
+tune_ged_boost() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Reduce GPU boost aggressiveness — less peak wattage = less heat spike
+        # boost_upper_bound caps the boost level; ged_boost_enable controls bursts
+        de_write 0 /sys/kernel/ged/hal/boost_upper_bound
+        de_write 0 /sys/kernel/ged/hal/ged_boost_enable
+        log_msg "GED boost: upper bound + bursts disabled"
+    else
+        # Restore defaults
+        de_write 100 /sys/kernel/ged/hal/boost_upper_bound
+        de_write 1   /sys/kernel/ged/hal/ged_boost_enable
+        log_msg "GED boost: restored to defaults"
+    fi
+}
+
 # ── Enable Cool Mode ──────────────────────────────────────────
 enable_cool() {
     log_msg "Enabling Cool Mode..."
@@ -174,9 +262,13 @@ enable_cool() {
     tune_dram_opp 1
     tune_gpu_dcs 1
     tune_mcdi 1
+    tune_fpsgo_thermal 1
+    tune_ppm_thermal 1
+    tune_thermal_msg 1
+    tune_ged_boost 1
     mkdir -p "$CFG_DIR"
     echo "enabled" > "$COOL_STATE"
-    log_msg "Cool Mode ENABLED ✓ (6 optimizations active)"
+    log_msg "Cool Mode ENABLED ✓ (10 optimizations active)"
 }
 
 # ── Disable Cool Mode ─────────────────────────────────────────
@@ -188,6 +280,10 @@ disable_cool() {
     tune_dram_opp 0
     tune_gpu_dcs 0
     tune_mcdi 0
+    tune_fpsgo_thermal 0
+    tune_ppm_thermal 0
+    tune_thermal_msg 0
+    tune_ged_boost 0
     mkdir -p "$CFG_DIR"
     echo "disabled" > "$COOL_STATE"
     log_msg "Cool Mode DISABLED ✓"

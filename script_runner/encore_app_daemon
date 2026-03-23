@@ -72,6 +72,7 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
 
     local killed=0
     local skipped=0
+    local killed_names=""
     local running
     running=$(dumpsys activity processes 2>/dev/null \
         | grep "ProcessRecord" \
@@ -87,8 +88,8 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
             com.google.android.gms|com.google.android.gsf) continue ;;
         esac
 
-        # Only count apps that are actually running (have a live PID)
-        # pidof returns empty if the process is already dead/stopped
+        # Only kill apps that are actually running (have a live PID)
+        # pidof returns empty if the process is already dead/force-stopped
         local pids
         pids=$(pidof "$target" 2>/dev/null)
         if [ -z "$pids" ]; then
@@ -99,18 +100,25 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
 
         am force-stop "$target" 2>/dev/null
         killed=$((killed + 1))
+        # Collect ultra-short app name (first 6 chars of last segment)
+        local short_name
+        short_name=$(echo "$target" | awk -F. '{print substr($NF,1,6)}')
+        if [ -z "$killed_names" ]; then
+            killed_names="$short_name"
+        else
+            killed_names="$killed_names $short_name"
+        fi
         log_msg "  KO: force-stopped $target (pids: $pids)"
     done
 
     local label
     label=$(get_app_label "$pkg")
     if [ "$killed" -gt 0 ]; then
-        de_notify "${killed} apps killed for ${label}" "KILL OTHERS" "warn"
-        log_msg "Kill Others: $killed killed, $skipped already stopped — for $pkg"
-    elif [ "$skipped" -gt 0 ]; then
-        log_msg "Kill Others: all $skipped apps already stopped — nothing to kill for $pkg"
+        # Show count + list of actually-killed apps only (not already-stopped ones)
+        de_notify "${killed} killed: ${killed_names}" "KILL OTHERS · ${label}" "warn"
+        log_msg "Kill Others: $killed killed, $skipped skipped (already stopped) — for $pkg"
     else
-        log_msg "Kill Others: nothing to kill for $pkg"
+        log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
     fi
 }
 
