@@ -299,13 +299,6 @@ function initFabSettings(){
     }
   });
 
-  // ── Restore Cache global toggle state from disk ────────────
-  exec(`cat ${CACHE_GLOBAL_CFG_FILE} 2>/dev/null`).then(raw => {
-    if (raw.trim() === '0') {
-      _cacheGlobalEnabled = false;
-      _syncCacheMenuItem(false);
-    }
-  });
 
   function _syncKoMenuItem(on) {
     const icon  = document.getElementById('fab-ko-icon');
@@ -316,14 +309,6 @@ function initFabSettings(){
     if (item)  item.style.opacity = on ? '1' : '0.5';
   }
 
-  function _syncCacheMenuItem(on) {
-    const icon  = document.getElementById('fab-cache-icon');
-    const label = document.getElementById('fab-cache-label');
-    const item  = document.getElementById('fab-menu-cache');
-    if (item)  item.setAttribute('aria-pressed', String(on));
-    if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
-    if (item)  item.style.opacity = on ? '1' : '0.5';
-  }
 
   function _syncToastMenuItem(on) {
     const icon  = document.getElementById('fab-toast-icon');
@@ -423,31 +408,6 @@ function initFabSettings(){
     );
   });
 
-  document.getElementById('fab-menu-cache')?.addEventListener('click', async e => {
-    e.stopPropagation();
-    closeAll();
-    _cacheGlobalEnabled = !_cacheGlobalEnabled;
-    _syncCacheMenuItem(_cacheGlobalEnabled);
-    await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
-    if (!_cacheGlobalEnabled) {
-      // Delete .cacheclear files for non-game apps only
-      await exec(
-        `GL="${CFG_DIR}/gl_pkgs"; ` +
-        `for f in ${RR_DIR}/*.cacheclear; do ` +
-        `  [ -f "$f" ] || continue; ` +
-        `  pkg=$(basename "$f" .cacheclear); ` +
-        `  if [ -f "$GL" ] && grep -qFx "$pkg" "$GL" 2>/dev/null; then continue; fi; ` +
-        `  rm -f "$f" "${RR_DIR}/\${pkg}.cacheclear_list" 2>/dev/null; ` +
-        `done`
-      );
-    }
-    showToast(
-      _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
-      'CLEAR CACHE',
-      _cacheGlobalEnabled ? 'success' : 'info',
-      '🗑'
-    );
-  });
 
   menuExit.addEventListener("click", async e=>{
     e.stopPropagation();
@@ -588,8 +548,7 @@ const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
 let _koGlobalEnabled = true;  // controls KO visibility in App Configuration
 const KO_GLOBAL_CFG_FILE = `${CFG_DIR}/ko_global_enabled`;
 
-let _cacheGlobalEnabled = true;  // controls Cache visibility in App Configuration
-const CACHE_GLOBAL_CFG_FILE = `${CFG_DIR}/cache_global_enabled`;
+const _cacheGlobalEnabled = true;  // always enabled — gear toggle removed
 
 function showToast(msg, title='', type='success', icon='', dur=2800) {
   if (!_toastEnabled) return;
