@@ -70,6 +70,17 @@ cache_global_enabled() {
     v=$(tr -d '[:space:]' < "$CFG_DIR/cache_global_enabled" 2>/dev/null)
     [ "$v" != "0" ]   # default ON if file missing
 }
+# Check if pkg is a game (uses full WebUI-generated list, falls back to Encore list)
+is_game_pkg() {
+    local pkg="$1"
+    local gl="$CFG_DIR/gl_pkgs"
+    if [ -f "$gl" ]; then
+        grep -qFx "$pkg" "$gl" 2>/dev/null && return 0
+    else
+        gamelist_has_pkg "$pkg" && return 0
+    fi
+    return 1
+}
 
 # Reads $RR_DIR/$pkg.killothers (flag) + $RR_DIR/$pkg.killothers_bl (spare list)
 kill_others_for_pkg() {
@@ -639,7 +650,7 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         fi
         # Kill Others
         if [ -f "$RR_DIR/$pkg.killothers" ]; then
-            if gamelist_has_pkg "$pkg" || ko_global_enabled; then
+            if is_game_pkg "$pkg" || ko_global_enabled; then
                 kill_others_for_pkg "$pkg"
                 log_msg "  KO(lc): ran for $pkg"
             else
@@ -648,7 +659,7 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         fi
         # Cache Clear
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            if gamelist_has_pkg "$pkg" || cache_global_enabled; then
+            if is_game_pkg "$pkg" || cache_global_enabled; then
                 clear_cache_for_pkg "$pkg"
                 log_msg "  Cache(lc): ran for $pkg"
             else
@@ -750,11 +761,12 @@ while true; do
     if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
         _ko_cc_last_pkg="$current_pkg"
         if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
-            if [ -f "$RR_DIR/$current_pkg.killothers" ] && ko_global_enabled; then
+            if [ -f "$RR_DIR/$current_pkg.killothers" ] && { is_game_pkg "$current_pkg" || ko_global_enabled; }; then
                 kill_others_for_pkg "$current_pkg" &
             fi
             if [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
-                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && cache_global_enabled; then
+                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && \
+                { is_game_pkg "$current_pkg" || cache_global_enabled; }; then
                 clear_cache_for_pkg "$current_pkg" &
             fi
         fi

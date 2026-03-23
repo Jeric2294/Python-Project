@@ -4804,6 +4804,9 @@ async function loadGameListPanel() {
   const merged = [...new Set([...intentPkgs, ...dumpPkgs, ...encoreGamePkgs])].sort();
   _glPkgs = merged;
 
+  // Write game list to disk so encore_app_daemon can detect games accurately
+  exec(`mkdir -p ${CFG_DIR} && printf '%s\n' ${merged.map(p => `'${p}'`).join(' ')} > ${CFG_DIR}/gl_pkgs 2>/dev/null`);
+
   _glLoaded = true;
 
   // Update ribbon
