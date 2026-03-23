@@ -5015,6 +5015,14 @@ async function loadGpuPanel() {
 function _renderOppTable() {
   const table = document.getElementById('gpu-opp-table');
   if (!table) return;
+  // If only 1 entry found from kernel, expand _gpuFreqMap in-place using fallback formula
+  // so that applyGpuLock, _gpuFreqLabel, and the table all use the same consistent data
+  if (Object.keys(_gpuFreqMap).length <= 1) {
+    const maxMHz = _gpuFreqMap[0] ?? 886;
+    const minMHz = _gpuFreqMap[_gpuOppMax] ?? Math.round(maxMHz * 0.42);
+    for (let i = 0; i <= _gpuOppMax; i++)
+      _gpuFreqMap[i] = Math.round(maxMHz - (maxMHz - minMHz) * i / _gpuOppMax);
+  }
   const entries = Object.entries(_gpuFreqMap).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
   if (!entries.length) { table.innerHTML = '<span class="mono" style="font-size:9px;color:var(--dim);padding:6px;">OPP data unavailable</span>'; return; }
   const maxFreq = Math.max(...entries.map(e => e[1]));
@@ -5023,7 +5031,7 @@ function _renderOppTable() {
     const pct = maxFreq === minFreq ? 100 : Math.round((freq - minFreq) / (maxFreq - minFreq) * 100);
     const isMax = parseInt(idx) === 0;
     const isMin = parseInt(idx) === _gpuOppMax;
-    return `<div class="gpu-opp-row" data-opp="${idx}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;border:0.5px solid transparent;transition:background 0.15s,border-color 0.15s;">
+    return `<div class="gpu-opp-row" data-opp="${idx}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;touch-action:manipulation;border:0.5px solid transparent;transition:background 0.15s,border-color 0.15s;">
       <span class="mono" style="font-size:9px;color:var(--dim);width:36px;flex-shrink:0;">OPP ${idx}</span>
       <div style="flex:1;height:4px;border-radius:2px;background:rgba(var(--a-rgb),0.1);overflow:hidden;">
         <div style="height:100%;width:${pct}%;background:var(--a);border-radius:2px;transition:width 0.3s;"></div>
@@ -5032,7 +5040,7 @@ function _renderOppTable() {
     </div>`;
   }).join('');
   table.querySelectorAll('.gpu-opp-row').forEach(row => {
-    row.addEventListener('click', () => {
+    const _oppRowHandler = () => {
       const opp = parseInt(row.dataset.opp);
       const slider = document.getElementById('gpu-opp-slider');
       if (slider) {
@@ -5041,7 +5049,9 @@ function _renderOppTable() {
         _syncSliderFill(slider);
       }
       _highlightOppRow(opp);
-    }, { passive: true });
+    };
+    row.addEventListener('click', _oppRowHandler, { passive: true });
+    row.addEventListener('touchend', e => { e.preventDefault(); _oppRowHandler(); });
   });
 }
 
