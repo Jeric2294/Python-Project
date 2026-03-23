@@ -196,6 +196,13 @@ apply_killothers() {
             if [ -f "$BL_FILE" ] && grep -qxF "$pkg" "$BL_FILE" 2>/dev/null; then
                 continue
             fi
+            # Skip already-stopped apps: check pidof + proc state
+            _pids=$(pidof "$pkg" 2>/dev/null)
+            [ -z "$_pids" ] && continue
+            _state=$(cat "/proc/$(echo $_pids | cut -d' ' -f1)/status" 2>/dev/null | grep "^State:" | grep -oE "[RSDTZX]")
+            [ "$_state" = "T" ] || [ "$_state" = "Z" ] || [ -z "$_state" ] && continue
+            _stopped=$(dumpsys package "$pkg" 2>/dev/null | grep -m1 "stopped=" | grep -o "stopped=true")
+            [ "$_stopped" = "stopped=true" ] && continue
             am force-stop "$pkg" 2>/dev/null
             echo "$pkg" | awk -F. '{print $NF}' >> "$TMP_FILE"
         done
