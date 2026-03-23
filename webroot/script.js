@@ -10887,13 +10887,7 @@ async function _clearSelectedCache() {
   let failed = 0;
 
   for (const pkg of _cacheSelected) {
-    const result = await exec(
-      `pm clear --cache-only ${pkg} 2>/dev/null; ` +
-      `rm -rf /data/user/0/${pkg}/cache/* 2>/dev/null; ` +
-      `rm -rf /data/user_de/0/${pkg}/cache/* 2>/dev/null; ` +
-      `rm -rf /data/data/${pkg}/cache/* 2>/dev/null; ` +
-      `echo OK`
-    );
+    const result = await exec(`pm clear --cache-only ${pkg} 2>/dev/null || rm -rf /data/data/${pkg}/cache 2>/dev/null && echo OK`);
     if (result.includes('Success') || result.includes('OK')) {
       cleared++;
     } else {
@@ -10921,17 +10915,17 @@ async function _clearSelectedCache() {
 
 /* ═══════════════════════════════════════════════════════════
    CACHE CLEAR ON LAUNCH — Per-app popup
-   File: RR_DIR/pkg.cacheclear (flag)
-   File: RR_DIR/pkg.cacheclear_list (newline-separated pkgs)
+   NEW LOGIC: clear ALL user app caches on launch, except spared list.
+   File: RR_DIR/pkg.cacheclear        (flag — enabled/disabled)
+   File: RR_DIR/pkg.cacheclear_list   (spare list — apps to SKIP)
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheClearPkg       = '';
-let _cacheClearOn        = false;
-let _cacheClearList      = new Set();
-let _cacheClearAllPkgs   = [];   // user packages
-let _cacheClearSysPkgs   = [];   // system packages
-let _cacheClearTab       = 'all';
-let _cacheClearQuery     = '';
+let _cacheClearPkg     = '';
+let _cacheClearOn      = false;
+let _cacheSpareList    = new Set();   // apps to SPARE (skip) from clearing
+let _cacheClearAllPkgs = [];          // user packages (system excluded)
+let _cacheClearTab     = 'all';
+let _cacheClearQuery   = '';
 
 async function _openCacheClearPopup(pkg) {
   _cacheClearPkg = pkg;
@@ -10941,15 +10935,16 @@ async function _openCacheClearPopup(pkg) {
 
   if (pkgEl) pkgEl.textContent = pkg;
 
-  // Load state from disk
+  // Load enabled flag
   const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
   _cacheClearOn = flagRaw.trim() === '1';
 
+  // Load spare list (apps to SKIP — not clear)
   const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
-  _cacheClearList = new Set(cleanLines(listRaw));
+  _cacheSpareList = new Set(cleanLines(listRaw));
 
   // Sync toggle
-  const tog = document.getElementById('cache-popup-toggle');
+  const tog      = document.getElementById('cache-popup-toggle');
   const togLabel = document.getElementById('cache-popup-toggle-label');
   if (tog) {
     tog.setAttribute('aria-pressed', String(_cacheClearOn));
@@ -10957,20 +10952,13 @@ async function _openCacheClearPopup(pkg) {
     if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
   }
 
-  // Load app list (user + system)
-  if (!_cacheClearAllPkgs.length) {
-    const [rawUser, rawSys] = await Promise.all([
-      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`),
-      exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`),
-    ]);
-    _cacheClearAllPkgs = rawUser.trim().split('\n').filter(p => p && p !== pkg);
-    _cacheClearSysPkgs = rawSys.trim().split('\n').filter(p => p && p !== pkg);
-  }
+  // Load user app list fresh each time (system packages excluded).
+  // Do NOT filter out pkg here — filter at render time so switching apps always shows correct list.
+  const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
+  _cacheClearAllPkgs = cleanLines(rawUser);
 
-  _cacheClearTab = 'all';
+  _cacheClearTab   = 'all';
   _cacheClearQuery = '';
-  // Reset system pkg cache on reopen (pkg may have changed)
-  _cacheClearSysPkgs = [];
   _renderCachePopupList();
   _updateCachePopupCount();
 
@@ -10995,7 +10983,7 @@ async function _openCacheClearPopup(pkg) {
     };
   }
 
-  // Wire tabs (selected / all / system)
+  // Wire tabs (spared / all)
   document.querySelectorAll('[data-cachetab]').forEach(btn => {
     btn.onclick = () => {
       _cacheClearTab = btn.dataset.cachetab;
@@ -11003,15 +10991,6 @@ async function _openCacheClearPopup(pkg) {
         b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
         b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
       });
-      // Load system pkgs on first switch to system tab
-      if (_cacheClearTab === 'system' && !_cacheClearSysPkgs.length) {
-        exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`).then(raw => {
-          _cacheClearSysPkgs = raw.trim().split('\n').filter(p => p && p !== _cacheClearPkg);
-          _updateCachePopupCount();
-          _renderCachePopupList();
-        });
-        return;
-      }
       _renderCachePopupList();
     };
   });
@@ -11041,12 +11020,15 @@ async function _openCacheClearPopup(pkg) {
 function _closeCacheClearPopup() {
   const overlay = document.getElementById('cache-clear-popup');
   if (overlay) overlay.style.display = 'none';
-  const count = _cacheClearList.size;
+  const spared  = _cacheSpareList.size;
   const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
-  if (count > 0) {
-    showToast(`${count} app${count !== 1 ? 's' : ''} will be cleared on launch`, appName.toUpperCase(), 'success', '🗑');
+  if (_cacheClearOn) {
+    const msg = spared > 0
+      ? `Cache cleared on launch • ${spared} app${spared !== 1 ? 's' : ''} spared`
+      : 'Cache cleared on launch • all user apps';
+    showToast(msg, appName.toUpperCase(), 'success', '🗑');
   } else {
-    showToast('No apps selected for cache clear', appName.toUpperCase(), 'info', '🗑');
+    showToast('Cache clear on launch disabled', appName.toUpperCase(), 'info', '🗑');
   }
 }
 
@@ -11054,11 +11036,12 @@ function _renderCachePopupList() {
   const list = document.getElementById('cache-popup-list');
   if (!list) return;
 
-  let pool = _cacheClearTab === 'selected'
-    ? [..._cacheClearAllPkgs, ..._cacheClearSysPkgs].filter(p => _cacheClearList.has(p))
-    : _cacheClearTab === 'system'
-      ? _cacheClearSysPkgs
-      : _cacheClearAllPkgs;
+  // spared tab: show only spared apps; all tab: show all user apps
+  // Always exclude the launching app itself — it's permanently spared
+  let pool = (_cacheClearTab === 'spared'
+    ? _cacheClearAllPkgs.filter(p => _cacheSpareList.has(p))
+    : _cacheClearAllPkgs
+  ).filter(p => p && p !== _cacheClearPkg);
 
   if (_cacheClearQuery) {
     const q = _cacheClearQuery.toLowerCase();
@@ -11069,67 +11052,70 @@ function _renderCachePopupList() {
   _updateCachePopupCount();
 
   if (!pool.length) {
-    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">No apps</div>`;
+    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">${
+      _cacheClearTab === 'spared' ? 'No apps spared' : 'No apps'
+    }</div>`;
     return;
   }
 
-  list.innerHTML = pool.map(pkg => {
-    const label = typeof getAppLabel === 'function' ? getAppLabel(pkg) : pkg;
-    const sel = _cacheClearList.has(pkg);
+  list.innerHTML = pool.map(p => {
+    const label  = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
+    const spared = _cacheSpareList.has(p);
+    // Spared = shield icon + highlighted; not spared = will be cleared (checkmark style)
     return `
-      <div class="list-item" data-pkg="${pkg}" onclick="_toggleCacheClearApp('${pkg}')">
+      <div class="list-item" data-pkg="${p}" onclick="_toggleCacheSpareApp('${p}')">
         <div class="item-row">
-          <div class="app-icon-wrap" data-pkg="${pkg}">
+          <div class="app-icon-wrap" data-pkg="${p}">
             <img class="app-icon" alt="${label.toUpperCase()}">
           </div>
           <div class="item-info">
             <span class="item-title">${label.toUpperCase()}</span>
-            <span class="item-desc mono">${pkg}</span>
+            <span class="item-desc mono">${p}</span>
           </div>
         </div>
         <div class="btn-row">
-          <div id="cachepop-chk-${pkg.replace(/\./g,'_')}"
+          <div id="cachepop-chk-${p.replace(/\./g,'_')}"
             style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
-            background:${sel ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
-            ${sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : ''}
+            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
           </div>
         </div>
       </div>`;
   }).join('');
 
-  // Load icons using same pattern as other panels
   if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
 }
 
-async function _toggleCacheClearApp(pkg) {
-  if (_cacheClearList.has(pkg)) {
-    _cacheClearList.delete(pkg);
+async function _toggleCacheSpareApp(pkg) {
+  if (_cacheSpareList.has(pkg)) {
+    _cacheSpareList.delete(pkg);
   } else {
-    _cacheClearList.add(pkg);
+    _cacheSpareList.add(pkg);
   }
 
-  // Save list to disk — use lsWrite() to avoid \r injection via KSU/APatch bridge
-  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheClearList]));
+  // Save spare list to disk — shell reads this to skip these apps
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheSpareList]));
 
   // Update checkbox
   const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');
-  const chk = document.getElementById(safeId);
-  const sel = _cacheClearList.has(pkg);
+  const chk    = document.getElementById(safeId);
+  const spared = _cacheSpareList.has(pkg);
   if (chk) {
-    chk.style.background = sel ? 'var(--a)' : 'transparent';
-    chk.innerHTML = sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : '';
+    chk.style.background = spared ? 'var(--a)' : 'transparent';
+    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
   }
   _updateCachePopupCount();
 }
 
 function _updateCachePopupCount() {
-  const count = _cacheClearList.size;
-  const selTab = document.getElementById('cache-popup-count-selected');
-  const allTab = document.getElementById('cache-popup-count-all');
-  const sysTab = document.getElementById('cache-popup-count-system');
-  const main   = document.getElementById('cache-popup-count');
-  if (selTab) selTab.textContent = count;
-  if (allTab) allTab.textContent = _cacheClearAllPkgs.length;
-  if (sysTab) sysTab.textContent = _cacheClearSysPkgs.length;
-  if (main)   main.textContent   = `${count} app${count !== 1 ? 's' : ''} selected`;
+  const spared  = _cacheSpareList.size;
+  const total   = _cacheClearAllPkgs.filter(p => p !== _cacheClearPkg).length;
+  const sprdTab = document.getElementById('cache-popup-count-spared');
+  const allTab  = document.getElementById('cache-popup-count-all');
+  const main    = document.getElementById('cache-popup-count');
+  if (sprdTab) sprdTab.textContent = spared;
+  if (allTab)  allTab.textContent  = total;
+  if (main)    main.textContent    = spared > 0
+    ? `${spared} app${spared !== 1 ? 's' : ''} spared`
+    : 'all user apps will be cleared';
 }

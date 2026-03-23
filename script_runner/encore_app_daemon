@@ -141,96 +141,91 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
         log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
     fi
 }
-
-# ── Clear cache on launch for a package ───────────────────────
-# Reads $RR_DIR/$pkg.cacheclear (flag) + $RR_DIR/$pkg.cacheclear_list (targets)
+# ── Clear ALL user app caches on launch (spare list honored) ──────────────
+# File: RR_DIR/pkg.cacheclear        — flag (enabled/disabled)
+# File: RR_DIR/pkg.cacheclear_list   — spare list (apps to SKIP, NOT clear)
+#
+# When enabled: clears cache of EVERY user-installed app except:
+#   • the launching app itself
+#   • apps listed in the spare list
+#   • hardcoded system-critical packages
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
 
-    # Check global toggle: if OFF, only allow for games
-    if ! cache_global_enabled; then
-        if ! is_game_pkg "$pkg"; then
-            log_msg "  CacheClr: skipped for $pkg — global toggle OFF and not a game"
-            return
-        fi
+    # Build spare set: always spare the launching app itself
+    local spare_list="$pkg"
+    if [ -f "$RR_DIR/$pkg.cacheclear_list" ]; then
+        spare_list="${spare_list}
+$(tr -d '\r' < "$RR_DIR/$pkg.cacheclear_list" 2>/dev/null)"
     fi
 
-    [ -f "$RR_DIR/$pkg.cacheclear_list" ] || return
+    # Get all user-installed packages
+    local all_pkgs
+    all_pkgs=$(pm list packages -3 2>/dev/null | cut -d: -f2 | sort)
+    [ -z "$all_pkgs" ] && return
 
     local cleared=0
     local skipped=0
-    local target
-    # Use tr to strip \r from the entire file before reading to avoid issues with IFS
+
     while IFS= read -r target; do
         [ -z "$target" ] && continue
 
-        # Check cache size across all known locations.
-        # /data/user/0/  = credential-encrypted (primary, modern Android)
-        # /data/user_de/0/ = device-encrypted (direct boot, many apps use this too)
-        # /data/data/    = legacy symlink on older devices
-        local cache_size=0
-        local s1 s2 s3
-        s1=$(du -sk "/data/user/0/$target/cache"    2>/dev/null | cut -f1)
-        s2=$(du -sk "/data/user_de/0/$target/cache" 2>/dev/null | cut -f1)
-        s3=$(du -sk "/data/data/$target/cache"      2>/dev/null | cut -f1)
-        cache_size=$(( ${s1:-0} + ${s2:-0} + ${s3:-0} ))
-
-        # Only skip if ALL paths confirmed 0 KB (du success but empty).
-        # If du failed entirely (all empty strings), ${sN:-0} = 0 → sum = 0 → would skip.
-        # Guard: if all three du calls returned nothing (unreadable), attempt clear anyway.
-        if [ -z "$s1" ] && [ -z "$s2" ] && [ -z "$s3" ]; then
-            # du couldn't read any path — could be permissions; attempt clear anyway
-            cache_size=1
-        fi
-
-        if [ "$cache_size" = "0" ]; then
+        # Skip spared apps
+        if echo "$spare_list" | grep -qFx "$target" 2>/dev/null; then
             skipped=$((skipped + 1))
-            log_msg "  CacheClr: $target cache already empty — skipping"
             continue
         fi
 
-        # PRIMARY: direct rm of cache CONTENTS (not the dir itself).
-        # Deleting the directory breaks apps that don't recreate it on next launch.
-        # We have root — this is the most reliable method on all Android versions.
-        local did_rm=0
+        # Skip system-critical packages
+        case "$target" in
+            android|com.android.systemui|com.android.phone|\
+            com.android.settings|com.android.launcher*|\
+            com.google.android.gms|com.google.android.gsf|\
+            com.topjohnwu.magisk|com.android.shell|\
+            com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
+        esac
+
+        # Clear cache contents across all known paths
+        local total_kb=0
+        local did_clear=0
+        local _seen_real=""
+
         for cache_dir in \
             "/data/user/0/$target/cache" \
             "/data/user_de/0/$target/cache" \
             "/data/data/$target/cache"; do
             [ -d "$cache_dir" ] || continue
-            # Only delete if it's not a symlink loop or a bind-mount of the same dir
-            real1=$(readlink -f "$cache_dir" 2>/dev/null)
-            [ -z "$real1" ] && real1="$cache_dir"
-            # Track real paths to avoid double-deleting symlinked dirs
-            case "$_cleared_real_paths" in
-                *"|${real1}|"*) continue ;;  # already cleared this real path
-            esac
-            _cleared_real_paths="${_cleared_real_paths}|${real1}|"
+            local real_dir
+            real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
+            case "$_seen_real" in *"|${real_dir}|"*) continue ;; esac
+            _seen_real="${_seen_real}|${real_dir}|"
+            local kb
+            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
+            [ "${kb:-0}" = "0" ] && continue
             rm -rf "${cache_dir:?}/"* 2>/dev/null
-            did_rm=1
+            total_kb=$(( total_kb + ${kb:-0} ))
+            did_clear=1
         done
-        _cleared_real_paths=""  # reset for next iteration
 
-        # SECONDARY: notify system so storage stats update (ignore exit code —
-        # pm clear --cache-only returns 0 on many devices but does nothing itself;
-        # we already cleared via rm above, this is just for bookkeeping).
-        pm clear --cache-only "$target" >/dev/null 2>&1 || true
+        if [ "$did_clear" = "1" ]; then
+            cleared=$((cleared + 1))
+            log_msg "  CacheClr: $target (~${total_kb}KB)"
+        else
+            skipped=$((skipped + 1))
+        fi
 
-        cleared=$((cleared + 1))
-        log_msg "  CacheClr: cleared $target (rm=${did_rm}, was ~${cache_size}KB)"
-
-    done <<EOF
-$(tr -d '\r' < "$RR_DIR/$pkg.cacheclear_list")
-EOF
+    done << PKGEOF
+$all_pkgs
+PKGEOF
 
     local label
     label=$(get_app_label "$pkg")
     if [ "$cleared" -gt 0 ]; then
-        de_notify "${cleared} app cache(s) cleared" "${label}" "success"
-        log_msg "Cache Clear: $cleared cleared, $skipped already empty — for $pkg"
-    elif [ "$skipped" -gt 0 ]; then
-        log_msg "Cache Clear: all $skipped caches already empty — nothing to clear for $pkg"
+        de_notify "${cleared} cache(s) cleared" "${label}" "success"
+        log_msg "Cache Clear: $cleared cleared, $skipped skipped — for $pkg"
+    else
+        log_msg "Cache Clear: nothing to clear ($skipped skipped) — for $pkg"
     fi
 }
 
@@ -574,8 +569,8 @@ activate_tweaks() {
     # ── Kill Others: force-stop other apps now ────────────────
     kill_others_for_pkg "$pkg" &
 
-    # ── Cache Clear: clear caches of configured apps ──────────
-    clear_cache_for_pkg "$pkg" &
+    # ── Cache Clear: clear all other user app caches if configured ───────────
+    [ -f "$RR_DIR/$pkg.cacheclear" ] && clear_cache_for_pkg "$pkg" &
 }
 
 # ── Deactivate tweaks and revert to normal ────────────────────
@@ -666,9 +661,15 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
                 log_msg "  KO(lc): skipped for $pkg — global toggle OFF"
             fi
         fi
-        # Cache Clear
+        # Cache Clear — fires if this app has cache clear enabled
+        # New behavior: clears ALL user app caches except spare list
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            clear_cache_for_pkg "$pkg"
+            if cache_global_enabled; then
+                clear_cache_for_pkg "$pkg"
+                log_msg "  Cache(lc): ran for $pkg"
+            else
+                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
         # Encore Gaming Mode
         if gamelist_has_pkg "$pkg"; then
@@ -748,14 +749,20 @@ while true; do
     # double execution. Non-Encore apps with these flags are handled here.
     if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
         _ko_cc_last_pkg="$current_pkg"
-        if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
-            if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
-                if ko_global_enabled; then
-                    kill_others_for_pkg "$current_pkg" &
+        if [ -n "$current_pkg" ]; then
+            # Kill Others — non-Encore apps only (Encore handled in activate_tweaks)
+            if ! gamelist_has_pkg "$current_pkg"; then
+                if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
+                    if ko_global_enabled; then
+                        kill_others_for_pkg "$current_pkg" &
+                    fi
                 fi
-            fi
-            if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
-                clear_cache_for_pkg "$current_pkg" &
+                # Cache clear — non-Encore apps only (flag alone is enough; spare list is optional)
+                if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
+                    if cache_global_enabled; then
+                        clear_cache_for_pkg "$current_pkg" &
+                    fi
+                fi
             fi
         fi
     fi
