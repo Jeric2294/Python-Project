@@ -10909,12 +10909,23 @@ async function _clearSelectedCache() {
   let cleared = 0, failed = 0;
 
   for (const pkg of _cacheSelected) {
-    // rm cache contents across all paths — same as daemon
+    // Clear both cache + code_cache, including hidden files, and verify directories are empty.
+    // Using find -mindepth 1 avoids the old "$d/*" bug that skipped dotfiles and often left cache behind.
     const res = await exec(
-      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do` +
-      `  [ -d "$d" ] && rm -rf "$d/"* 2>/dev/null; done; echo OK`
+      `had=0; ok=1; ` +
+      `for d in ` +
+      `  /data/user/0/${pkg}/cache /data/user/0/${pkg}/code_cache ` +
+      `  /data/user_de/0/${pkg}/cache /data/user_de/0/${pkg}/code_cache ` +
+      `  /data/data/${pkg}/cache /data/data/${pkg}/code_cache; do ` +
+      `  [ -d "$d" ] || continue; ` +
+      `  had=1; ` +
+      `  find "$d" -mindepth 1 -exec rm -rf -- {} + 2>/dev/null; ` +
+      `  if find "$d" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then ok=0; fi; ` +
+      `done; ` +
+      `if [ "$had" = 1 ] && [ "$ok" = 1 ]; then echo CLEARED; ` +
+      `elif [ "$had" = 1 ]; then echo FAIL; else echo EMPTY; fi`
     );
-    if (res.includes('OK')) cleared++; else failed++;
+    if (res.includes('CLEARED') || res.includes('EMPTY')) cleared++; else failed++;
   }
 
   if (status) {
