@@ -141,42 +141,35 @@ $(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
         log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
     fi
 }
-# ── Clear ALL user app caches on launch (global spare list honored) ────────
+# ── Clear selected app caches on launch ──────────────────────────────────
 # File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
-# File: /sdcard/DAVION_ENGINE/global_cache_spare.txt — global spare list
+# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
 #
-# Iterates /data/user/0/ directly — faster than pm list packages.
+# Clears only the apps that are checked/selected in the Cache Manager panel.
+# Same list that CLEAR SELECTED button in the panel uses.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
 
-    local GLOBAL_SPARE="/sdcard/DAVION_ENGINE/global_cache_spare.txt"
+    local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
 
-    # Build spare set: launching app + global spare list
-    local spare_list="$pkg"
-    if [ -f "$GLOBAL_SPARE" ]; then
-        spare_list="${spare_list}
-$(tr -d '\r' < "$GLOBAL_SPARE" 2>/dev/null)"
-    fi
+    # No selection = nothing to clear
+    [ -f "$SELECTED_FILE" ] || {
+        log_msg "Cache Clear: no selection file — skipping for $pkg"
+        return
+    }
 
     local cleared=0
     local skipped=0
-    # FIX [4]: Declare loop-local vars outside the loop — busybox sh doesn't
-    # reset `local` on each iteration; re-assignment inside the loop is enough.
-    local target total_kb did_clear seen_real real_dir kb cache_dir app_dir
+    local target total_kb did_clear seen_real real_dir kb cache_dir
 
-    for app_dir in /data/user/0/*/; do
-        target=$(basename "$app_dir")
-        # FIX [1]: was `[ -z ] || [ = "*" ] && continue` — wrong precedence.
-        # In sh: || has lower priority than &&, so only the "*" check fired.
-        # Correct form uses braces to group the OR condition.
+    while IFS= read -r target; do
+        # Strip CRLF from WebUI-written file
+        target=$(printf '%s' "$target" | tr -d '\r')
         { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
 
-        # Skip spared apps
-        if echo "$spare_list" | grep -qFx "$target" 2>/dev/null; then
-            skipped=$((skipped + 1))
-            continue
-        fi
+        # Always skip the launching app itself
+        [ "$target" = "$pkg" ] && { skipped=$((skipped + 1)); continue; }
 
         # Skip system-critical packages
         case "$target" in
@@ -187,7 +180,6 @@ $(tr -d '\r' < "$GLOBAL_SPARE" 2>/dev/null)"
             com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
         esac
 
-        # FIX [4]: Explicit reset each iteration — don't rely on `local`
         total_kb=0
         did_clear=0
         seen_real=""
@@ -213,7 +205,8 @@ $(tr -d '\r' < "$GLOBAL_SPARE" 2>/dev/null)"
         else
             skipped=$((skipped + 1))
         fi
-    done
+
+    done < "$SELECTED_FILE"
 
     local label
     label=$(get_app_label "$pkg")
@@ -658,9 +651,14 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             fi
         fi
         # Cache Clear — fires if this app has cache clear enabled
+        # New behavior: clears ALL user app caches except spare list
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            clear_cache_for_pkg "$pkg" &
-            log_msg "  Cache(lc): ran for $pkg"
+            if cache_global_enabled; then
+                clear_cache_for_pkg "$pkg"
+                log_msg "  Cache(lc): ran for $pkg"
+            else
+                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
         # Encore Gaming Mode
         if gamelist_has_pkg "$pkg"; then
@@ -679,30 +677,9 @@ log_msg "Logcat per-app watcher started (PID $_logcat_vol_pid)"
 
 while true; do
 
-    # ── Kill Others + Cache Clear — fires on real app change ─────────────
-    # Encore apps are handled inside activate_tweaks — skip them here to avoid
-    # double execution. Non-Encore apps with these flags are handled here.
-    if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
-        _ko_cc_last_pkg="$current_pkg"
-        if [ -n "$current_pkg" ]; then
-            # Kill Others — non-Encore apps only (Encore handled in activate_tweaks)
-            if ! gamelist_has_pkg "$current_pkg"; then
-                if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
-                    if ko_global_enabled; then
-                        kill_others_for_pkg "$current_pkg" &
-                    fi
-                fi
-                # Cache clear — non-Encore apps only
-                if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
-                    clear_cache_for_pkg "$current_pkg" &
-                fi
-            fi
-        fi
-    fi
-
-    # Skip Encore-dependent logic if gamelist doesn't exist
+    # Skip if gamelist doesn't exist (Encore not installed / no apps configured)
     if [ ! -f "$ENCORE_GAMELIST" ]; then
-        sleep 1
+        sleep 3
         continue
     fi
 
@@ -754,6 +731,29 @@ while true; do
         # Apply conn for new foreground app (skips if wifi/data already on)
         [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.conn" ] && \
             apply_per_app_conn "$current_pkg"
+    fi
+
+    # ── Kill Others + Cache Clear — fires on real app change ─────────────
+    # Encore apps are handled inside activate_tweaks — skip them here to avoid
+    # double execution. Non-Encore apps with these flags are handled here.
+    if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
+        _ko_cc_last_pkg="$current_pkg"
+        if [ -n "$current_pkg" ]; then
+            # Kill Others — non-Encore apps only (Encore handled in activate_tweaks)
+            if ! gamelist_has_pkg "$current_pkg"; then
+                if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
+                    if ko_global_enabled; then
+                        kill_others_for_pkg "$current_pkg" &
+                    fi
+                fi
+                # Cache clear — non-Encore apps only (flag alone is enough; spare list is optional)
+                if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
+                    if cache_global_enabled; then
+                        clear_cache_for_pkg "$current_pkg" &
+                    fi
+                fi
+            fi
+        fi
     fi
 
     # ── Detect if active game went to background ─────────────
