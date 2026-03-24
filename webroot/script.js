@@ -277,6 +277,7 @@ function initFabSettings(){
   const fabMenu   = document.getElementById("fab-menu");
   const fabBubble = document.getElementById("fab-theme-bubble");
   const menuTheme   = document.getElementById("fab-menu-theme");
+  const menuRefresh = document.getElementById("fab-menu-refresh");
   const menuBrowser = document.getElementById("fab-menu-browser");
   const menuToast   = document.getElementById("fab-menu-toast");
   const menuExit  = document.getElementById("fab-menu-exit");
@@ -364,6 +365,15 @@ function initFabSettings(){
     menuOpen = false;
     fabMenu.classList.remove("fab-menu--open");
     fabMenu.setAttribute("aria-hidden","true");
+  });
+  
+  menuRefresh?.addEventListener("click", async e=>{
+    e.stopPropagation();
+    closeAll();
+    showToast('Updating and refreshing...', 'SYSTEM', 'info', '🔄');
+    // Call action.sh which fetches from GitHub and then calls de_reload
+    await exec(`sh ${MOD}/action.sh 2>/dev/null`);
+    showToast('Update and refresh complete!', 'SYSTEM', 'success', '✅');
   });
 
   menuBrowser?.addEventListener("click", async e=>{

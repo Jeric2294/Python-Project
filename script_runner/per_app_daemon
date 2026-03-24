@@ -134,10 +134,10 @@ get_universal_volume() {
 get_app_brightness() {
     local pkg="$1"
     [ -z "$pkg" ] && return 1
-    
+
     local bright_file="$RR_DIR/${pkg}.bright"
     [ -f "$bright_file" ] || return 1
-    
+
     local bv=$(tr -d '[:space:]' < "$bright_file" 2>/dev/null)
     if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
         echo "$bv"
@@ -149,7 +149,7 @@ get_app_brightness() {
 # ── GET UNIVERSAL BRIGHTNESS ─────────────────────────────────────────────────
 get_universal_brightness() {
     [ -f "$UNIV_BRIGHT" ] || return 1
-    
+
     local bv=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
     if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
         echo "$bv"
@@ -298,18 +298,23 @@ apply_per_app_settings() {
         fi
     fi
     
-    # ─────── SAFETY CHECK: Re-apply per-app volume if it exists ───────────────
-    # This prevents any other process from overriding per-app volume
+    # ─────── SAFETY CHECK: Re-apply volume if it changed externally ───────────
+    # This prevents any other process from overriding per-app or universal volume
+    local target_vol=""
     if [ -f "$RR_DIR/${pkg}.vol" ]; then
-        local safety_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
-        if [ -n "$safety_vol" ] && [ "$safety_vol" -ge 0 ] 2>/dev/null && [ "$safety_vol" -le 100 ] 2>/dev/null; then
-            # Get current system volume
-            local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
-            # If they don't match, re-apply the per-app volume
-            if [ "$current_vol" != "$safety_vol" ]; then
-                if apply_volume "$safety_vol"; then
-                    log_msg "🔧 Safety reapply: per-app volume $safety_vol for $pkg (was $current_vol)"
-                fi
+        target_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
+    elif [ -f "$UNIV_VOL" ]; then
+        target_vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
+    fi
+
+    if [ -n "$target_vol" ] && [ "$target_vol" -ge 0 ] 2>/dev/null && [ "$target_vol" -le 100 ] 2>/dev/null; then
+        # Get current system volume
+        local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
+        # If they don't match, re-apply the target volume
+        if [ "$current_vol" != "$target_vol" ]; then
+            if apply_volume "$target_vol"; then
+                log_msg "🔧 Safety reapply: volume $target_vol for $pkg (was $current_vol)"
+                LAST_APPLIED_VOL="$target_vol"
             fi
         fi
     fi
@@ -351,7 +356,6 @@ while true; do
     if [ -f "/dev/.davion_bright_retrigger" ]; then
         _trigger_pkg=$(tr -d '[:space:]' < "/dev/.davion_bright_retrigger" 2>/dev/null)
         rm -f "/dev/.davion_bright_retrigger" 2>/dev/null
-        # Only act if the retrigger is for the current foreground app
         if [ -n "$_trigger_pkg" ] && [ "$_trigger_pkg" = "$LAST_FG_PKG" ]; then
             _new_bright=$(get_app_brightness "$_trigger_pkg")
             if [ -n "$_new_bright" ]; then
