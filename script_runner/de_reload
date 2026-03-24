@@ -8,7 +8,6 @@ MODDIR="/data/adb/modules/GovThermal"
 BB="$MODDIR/busybox"
 LOG="$MODDIR/service.log"
 CFG_DIR="/sdcard/GovThermal/config"
-RR_CFG="/sdcard/DAVION_ENGINE/config"
 DE_ENGINE="$MODDIR/DAVION_ENGINE/AI_MODE/de_cpu_engine"
 DE_TOAST="$MODDIR/script_runner/de_toast"
 
@@ -26,6 +25,7 @@ pkill -f "GovThermal.*logcat" 2>/dev/null
 pkill -f "GovThermal.*dumpsys2" 2>/dev/null
 pkill -f "rr_guard" 2>/dev/null
 pkill -f "idle60_daemon" 2>/dev/null
+pkill -f "battery_guard" 2>/dev/null
 pkill -f "headset_daemon" 2>/dev/null
 pkill -f "otg_daemon" 2>/dev/null
 pkill -f "thermal_watchdog" 2>/dev/null
@@ -71,41 +71,19 @@ SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
 
 # ── 5. Restart all daemons ───────────────────────────────────
 log_msg "Restarting daemons..."
-
-# Always-on daemons
 nohup sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/per_app_daemon"    >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/otg_daemon"        >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/hot_reload_daemon" >> "$LOG" 2>&1 &
-
-# Detection daemon — respect saved preference
-DETECTION_METHOD="logcat"
-if [ -f "$RR_CFG/enable_dumpsys" ] && [ ! -f "$RR_CFG/enable_logcat" ]; then
-    DETECTION_METHOD="dumpsys"
-fi
-case "$DETECTION_METHOD" in
-    dumpsys) nohup sh "$MODDIR/logcat_detection/dumpsys2" >> "$LOG" 2>&1 & ;;
-    *)       nohup sh "$MODDIR/logcat_detection/logcat"   >> "$LOG" 2>&1 & ;;
-esac
-
-# Flag-gated daemons — only restart if the user has them enabled
-IDLE60_STATE=$(tr -d '[:space:]' < "$CFG_DIR/idle60_enabled" 2>/dev/null)
-[ "$IDLE60_STATE" = "1" ] && nohup sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
-
-RR_GUARD_STATE=$(tr -d '[:space:]' < "$CFG_DIR/rr_guard_enabled" 2>/dev/null)
-[ "$RR_GUARD_STATE" = "1" ] && nohup sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
-
-if [ -f "$CFG_DIR/headset_vol_on_connect" ] || \
-   [ -f "$CFG_DIR/headset_mute_on_disconnect" ] || \
-   [ -f "$CFG_DIR/headset_restore_on_disconnect" ]; then
-    nohup sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
-fi
-
-# AI daemons
-nohup sh "$MODDIR/script_runner/thermal_watchdog"  >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/per_app_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/otg_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/thermal_watchdog" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/ai_thermal_predict" >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/ai_adaptive_freq"  >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/ai_adaptive_freq" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/ai_app_classifier" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/hot_reload_daemon" >> "$LOG" 2>&1 &
 
 # Restart WebUI
 "$BB" httpd -p 8080 -h "$MODDIR/webroot" -c "$MODDIR/httpd.conf" >> "$LOG" 2>&1 &

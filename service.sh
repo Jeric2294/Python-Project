@@ -186,7 +186,7 @@ fi
     esac
     echo "$SAVED_PROFILE" > "$CFG_DIR/active_profile"
 
-    # ── STAGE 2: boot_apply.sh ────────────────────────────────
+    # ── STAGE 2 (+3s): boot_apply.sh ─────────────────────────────
     log_msg "[BOOT-STAGE 2] Boot config apply"
     BOOT_APPLY="$CFG_DIR/boot_apply.sh"
     [ ! -f "$BOOT_APPLY" ] && BOOT_APPLY="$MODDIR/config/boot_apply.sh"
@@ -216,7 +216,7 @@ fi
     fi
 
 
-    # ── STAGE 3: GPU OPP + EEM ────────────────────────────────
+    # ── STAGE 3 (+7s): GPU + EEM ──────────────────────────────────
     log_msg "[BOOT-STAGE 3] GPU OPP + EEM restore"
 
     GPU_OPP_FILE="/sdcard/GovThermal/config/gpu_opp_index.txt"
@@ -245,7 +245,7 @@ fi
     fi
 
 
-    # ── STAGE 4: Thermal ──────────────────────────────────────
+    # ── STAGE 4 (+10s): Thermal ───────────────────────────────────
     log_msg "[BOOT-STAGE 4] Thermal restore"
     THERMAL_SCRIPT="$MODDIR/script_runner/thermal_toggle"
 
@@ -267,7 +267,7 @@ fi
     fi
 
 
-    # ── STAGE 5: SurfaceFlinger overlay, RR, saturation ──────
+    # ── STAGE 5 (+20s): SurfaceFlinger calls ─────────────────────
     log_msg "[BOOT-STAGE 5] SurfaceFlinger: overlay, RR, saturation"
 
     # Overlay
@@ -281,6 +281,7 @@ fi
         log_msg "Overlay: auto-OFF after 30s"
     ) &
 
+    sleep 0
 
     # Zeta Auto Max-Hz
     ZETA_MAX_RATE=$(cmd display dump 2>/dev/null | grep -Eo 'fps=[0-9.]+' | cut -f2 -d= | sort -nr | head -n1 | cut -d. -f1)
@@ -291,6 +292,7 @@ fi
         log_msg "Zeta: max Hz locked to ${ZETA_MAX_RATE}Hz"
     fi
 
+    sleep 0
 
     # Universal RR lock
     UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
@@ -305,6 +307,7 @@ fi
         log_msg "RR: auto (mode 0)"
     fi
 
+    sleep 0
 
     # Universal Brightness lock
     UNIVERSAL_BRIGHT_FILE="/sdcard/DAVION_ENGINE/universal_brightness.txt"
@@ -317,6 +320,7 @@ fi
         fi
     fi
 
+    sleep 0
 
     # Saturation restore
     SAT_FILE="$MODDIR/DAVION_ENGINE_BoostColor/saturation_value"
@@ -345,7 +349,7 @@ fi
     fi
 
 
-    # ── STAGE 6: Feature state restore ───────────────────────
+    # ── STAGE 6 (+22s): Feature states ───────────────────────────
     log_msg "[BOOT-STAGE 6] Feature state restore"
 
     REMOVELIMIT_STATE=$(tr -d '[:space:]' < "$CFG_DIR/removelimit_state" 2>/dev/null)
@@ -373,6 +377,7 @@ fi
         log_msg "Remove Limit: kept off"
     fi
 
+    sleep 0
 
     if [ "$ANIMATION_STATE" = "applied" ]; then
         resetprop ro.hios.ui.blur_disable                 1 2>/dev/null
@@ -407,6 +412,7 @@ fi
         log_msg "Animation Fix: kept off"
     fi
 
+    sleep 0
 
     # Animation Scale restore — use 0.5x as smooth default if no saved value
     ANIM_CFG="/sdcard/DAVION_ENGINE_AnimScale"
@@ -422,6 +428,7 @@ fi
         fi
     done
 
+    sleep 0
 
     # Charge Limit restore
     CHARGE_LIMIT_FILE="/sdcard/GovThermal/config/charge_limit.txt"
@@ -441,7 +448,7 @@ fi
 
 
 
-    # ── STAGE 6.5: SF Illusion Method ────────────────────────
+    # ── STAGE 6.5 (+28s): SF Illusion Method ─────────────────────
     log_msg "[BOOT-STAGE 6.5] SurfaceFlinger illusion method + phase offsets"
 
     # Core illusion method: keep 120Hz render pipeline active even when
@@ -502,13 +509,32 @@ fi
     FEAT_THROTTLE_FLAG="$CFG_DIR/feat_anti_throttle"
 
     if [ -f "$FEAT_FRAME_FLAG" ]; then
-        # SF phase props already set unconditionally in stage 6.5 above.
-        # Only apply the settings that differ from the baseline here.
+        resetprop debug.sf.frame_rate_multiple_threshold 120 2>/dev/null
+        resetprop debug.sf.use_phase_offsets_as_durations 0 2>/dev/null
+        setprop debug.sf.early_phase_offset_ns 1500000
+        setprop debug.sf.early_app_phase_offset_ns 1500000
+        setprop debug.sf.early_gl_phase_offset_ns 3000000
+        setprop debug.sf.early_gl_app_phase_offset_ns 15000000
+        setprop debug.sf.high_fps_early_app_phase_offset_ns -4000000
+        setprop debug.sf.high_fps_late_app_phase_offset_ns 1000000
+        setprop debug.sf.high_fps_early_sf_phase_offset_ns -4000000
+        setprop debug.sf.high_fps_late_sf_phase_offset_ns 1000000
+        setprop debug.sf.enable_advanced_sf_phase_offset 1
+        setprop vendor.debug.sf.latch_unsignaled 1
+        setprop debug.sf.latch_unsignaled 1
+        setprop debug.sf.auto_latch_unsignaled 1
+        setprop debug.sf.disable_backpressure 1
+        setprop debug.sf.enable_gl_backpressure 0
+        setprop debug.sf.disable_client_composition_cache 1
         resetprop ro.surface_flinger.set_touch_timer_ms 3000 2>/dev/null
         resetprop ro.surface_flinger.set_idle_timer_ms 3000 2>/dev/null
         resetprop ro.surface_flinger.enable_frame_rate_override true 2>/dev/null
         settings put system peak_refresh_rate 120.0 2>/dev/null
         settings put system min_refresh_rate 90.0 2>/dev/null
+        setprop debug.renderengine.backend skiaglthreaded
+        setprop debug.hwui.renderer skiagl
+        setprop debug.hwui.fps_divisor 1
+        setprop debug.hwui.profile.maxframes 120
         log_msg "Features: FRAME STABILITY restored from flag"
     fi
 
@@ -531,16 +557,14 @@ fi
         log_msg "Features: ANTI-THROTTLE BOOST restored from flag"
     fi
 
-    # ── STAGE 7: Daemons ──────────────────────────────────────
+    # ── STAGE 7 (+30s): Daemons ───────────────────────────────────
     log_msg "[BOOT-STAGE 7] Starting daemons"
 
     # Detection daemon (logcat/dumpsys)
     pkill -f "GovThermal.*logcat"   2>/dev/null
     pkill -f "GovThermal.*dumpsys2" 2>/dev/null
-
-    # Default to logcat if no preference file exists
-    [ ! -f "$RR_CFG/enable_logcat" ] && [ ! -f "$RR_CFG/enable_dumpsys" ] && \
-        touch "$RR_CFG/enable_logcat" 2>/dev/null
+    touch "$RR_CFG/enable_logcat" 2>/dev/null
+    rm -f "$RR_CFG/enable_dumpsys"  2>/dev/null
 
     DETECTION_METHOD="logcat"
     if [ -f "$RR_CFG/enable_dumpsys" ] && [ ! -f "$RR_CFG/enable_logcat" ]; then
@@ -564,6 +588,7 @@ fi
             ;;
     esac
 
+    sleep 0
 
     # StormGuard
     SG_STATE=$(tr -d '[:space:]' < "$CFG_DIR/stormguard_state" 2>/dev/null)
@@ -573,6 +598,7 @@ fi
         log_msg "Storm Guard: boot counter service started"
     fi
 
+    sleep 0
 
     # Encore App Daemon
     ENCORE_APP_DAEMON="$MODDIR/script_runner/encore_app_daemon"
@@ -583,6 +609,7 @@ fi
         log_msg "Encore App Daemon started (PID $!)"
     fi
 
+    sleep 0
 
     # Auto 60Hz Drop daemon
     IDLE60_FLAG="$CFG_DIR/idle60_enabled"
@@ -648,6 +675,7 @@ fi
     nohup sh "$HOT_RELOAD_DAEMON" >> "$LOG" 2>&1 &
     log_msg "Hot Reload daemon started (PID $!)"
 
+    sleep 0
 
 
     # ── Per-app configs confirmation ───────────────────────────

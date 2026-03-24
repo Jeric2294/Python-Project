@@ -14,7 +14,7 @@
 MODDIR="/data/adb/modules/GovThermal"
 WATCH_DIR="/sdcard/DAVION_ENGINE/hot_reload"
 BACKUP_DIR="$WATCH_DIR/backup"
-LOG="/sdcard/GovThermal/GovThermal.log"
+LOG="$MODDIR/service.log"
 BB="$MODDIR/busybox"
 DE_TOAST="$MODDIR/script_runner/de_toast"
 
@@ -32,6 +32,7 @@ _needs_encore=0
 _needs_logcat=0
 _needs_rr_guard=0
 _needs_idle60=0
+_needs_battery_guard=0
 _needs_headset=0
 _needs_otg=0
 _needs_thermal_wdog=0
@@ -45,19 +46,21 @@ mark_restart() {
             _needs_httpd=1 ;;
         script_runner/encore_app_daemon)
             _needs_encore=1 ;;
-        logcat_detection/logcat|logcat_detection/dumpsys2)
+        logcat_detection/logcat|        logcat_detection/dumpsys2)
             _needs_logcat=1 ;;
         script_runner/rr_guard)
             _needs_rr_guard=1 ;;
         script_runner/idle60_daemon)
             _needs_idle60=1 ;;
+        script_runner/battery_guard)
+            _needs_battery_guard=1 ;;
         script_runner/headset_daemon)
             _needs_headset=1 ;;
         script_runner/otg_daemon)
             _needs_otg=1 ;;
         script_runner/thermal_watchdog)
             _needs_thermal_wdog=1 ;;
-        script_runner/ai_thermal_predict|script_runner/ai_adaptive_freq|script_runner/ai_app_classifier)
+        script_runner/ai_thermal_predict|        script_runner/ai_adaptive_freq|        script_runner/ai_app_classifier)
             _needs_ai=1 ;;
         script_runner/hot_reload_daemon)
             _needs_hot_reload=1 ;;
@@ -93,6 +96,7 @@ apply_zip() {
     _needs_encore=0
     _needs_rr_guard=0
     _needs_idle60=0
+    _needs_battery_guard=0
     _needs_headset=0
 
     notify "Applying $zip_name…" "info"
@@ -160,84 +164,9 @@ apply_zip() {
 
     log_msg "Applied: $applied files, Failed: $failed files"
 
-    # ── Targeted service restarts based on what actually changed ───
-    log_msg "Restarting affected services..."
-
-    if [ "$_needs_httpd" = "1" ]; then
-        pkill -f "httpd.*8080" 2>/dev/null; sleep 0.3
-        "$BB" httpd -p 8080 -h "$MODDIR/webroot/" -c "$MODDIR/httpd.conf" >>"$LOG" 2>&1 &
-        log_msg "  Restarted: httpd (PID $!)"
-    fi
-    if [ "$_needs_encore" = "1" ]; then
-        pkill -f "encore_app_daemon" 2>/dev/null; sleep 0.2
-        nohup sh "$MODDIR/script_runner/encore_app_daemon" >>"$LOG" 2>&1 &
-        log_msg "  Restarted: encore_app_daemon (PID $!)"
-    fi
-    if [ "$_needs_logcat" = "1" ]; then
-        pkill -f "GovThermal.*logcat" 2>/dev/null
-        pkill -f "GovThermal.*dumpsys2" 2>/dev/null
-        sleep 0.2
-        RR_CFG="/sdcard/DAVION_ENGINE/config"
-        if [ -f "$RR_CFG/enable_dumpsys" ] && [ ! -f "$RR_CFG/enable_logcat" ]; then
-            nohup sh "$MODDIR/logcat_detection/dumpsys2" >>"$LOG" 2>&1 &
-        else
-            nohup sh "$MODDIR/logcat_detection/logcat" >>"$LOG" 2>&1 &
-        fi
-        log_msg "  Restarted: detection daemon (PID $!)"
-    fi
-    if [ "$_needs_rr_guard" = "1" ]; then
-        CFG_DIR="/sdcard/GovThermal/config"
-        pkill -f "rr_guard" 2>/dev/null; sleep 0.2
-        RR_GUARD_STATE=$(tr -d '[:space:]' < "$CFG_DIR/rr_guard_enabled" 2>/dev/null)
-        [ "$RR_GUARD_STATE" = "1" ] && {
-            nohup sh "$MODDIR/script_runner/rr_guard" >>"$LOG" 2>&1 &
-            log_msg "  Restarted: rr_guard (PID $!)"
-        }
-    fi
-    if [ "$_needs_idle60" = "1" ]; then
-        CFG_DIR="/sdcard/GovThermal/config"
-        pkill -f "idle60_daemon" 2>/dev/null; sleep 0.2
-        IDLE60_STATE=$(tr -d '[:space:]' < "$CFG_DIR/idle60_enabled" 2>/dev/null)
-        [ "$IDLE60_STATE" = "1" ] && {
-            nohup sh "$MODDIR/script_runner/idle60_daemon" >>"$LOG" 2>&1 &
-            log_msg "  Restarted: idle60_daemon (PID $!)"
-        }
-    fi
-    if [ "$_needs_headset" = "1" ]; then
-        CFG_DIR="/sdcard/GovThermal/config"
-        pkill -f "headset_daemon" 2>/dev/null; sleep 0.2
-        if [ -f "$CFG_DIR/headset_vol_on_connect" ] || \
-           [ -f "$CFG_DIR/headset_mute_on_disconnect" ] || \
-           [ -f "$CFG_DIR/headset_restore_on_disconnect" ]; then
-            nohup sh "$MODDIR/script_runner/headset_daemon" >>"$LOG" 2>&1 &
-            log_msg "  Restarted: headset_daemon (PID $!)"
-        fi
-    fi
-    if [ "$_needs_otg" = "1" ]; then
-        pkill -f "otg_daemon" 2>/dev/null; sleep 0.2
-        nohup sh "$MODDIR/script_runner/otg_daemon" >>"$LOG" 2>&1 &
-        log_msg "  Restarted: otg_daemon (PID $!)"
-    fi
-    if [ "$_needs_thermal_wdog" = "1" ]; then
-        pkill -f "thermal_watchdog" 2>/dev/null; sleep 0.2
-        nohup sh "$MODDIR/script_runner/thermal_watchdog" >>"$LOG" 2>&1 &
-        log_msg "  Restarted: thermal_watchdog (PID $!)"
-    fi
-    if [ "$_needs_ai" = "1" ]; then
-        pkill -f "ai_thermal_predict" 2>/dev/null
-        pkill -f "ai_adaptive_freq"   2>/dev/null
-        pkill -f "ai_app_classifier"  2>/dev/null
-        sleep 0.2
-        nohup sh "$MODDIR/script_runner/ai_thermal_predict" >>"$LOG" 2>&1 &
-        nohup sh "$MODDIR/script_runner/ai_adaptive_freq"   >>"$LOG" 2>&1 &
-        nohup sh "$MODDIR/script_runner/ai_app_classifier"  >>"$LOG" 2>&1 &
-        log_msg "  Restarted: AI daemons"
-    fi
-    if [ "$_needs_hot_reload" = "1" ]; then
-        log_msg "  hot_reload_daemon updated — will restart on next iteration"
-        # Can't reliably restart ourselves; the new binary will take effect next time
-        # the watch loop naturally re-execs (or on next reboot).
-    fi
+    # ── Apply changes and restart services ─────────────────────────
+    log_msg "Applying changes via de_reload..."
+    sh "$MODDIR/script_runner/de_reload" >> "$LOG" 2>&1
 
     # ── Done notification ─────────────────────────────────────
     if [ "$failed" = "0" ]; then
