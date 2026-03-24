@@ -22,6 +22,7 @@ UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
 LAST_FG_PKG="/dev/.davion_last_fg_pkg"
 TOUCH_TS="/data/local/tmp/idle60_ts"   # updated by heartbeat on every touch
 IDLE60_FLAG="/dev/.davion_idle60_dropped"  # signals rr_guard that we intentionally dropped
+IDLE60_DROPPED_PKG="/dev/.davion_idle60_dropped_pkg"  # which pkg was dropped
 RESTORE_FLAG="/dev/.davion_idle60_restore"   # heartbeat sets this to trigger instant restore
 CACHED_RR="/dev/.davion_idle60_cached_rr"   # pre-cached target mode at drop time (tmpfs, zero-cost read)
 
@@ -112,7 +113,7 @@ pkill -f "getevent $TS_DEV" 2>/dev/null
                         service call SurfaceFlinger 1035 i32 "$_m" >/dev/null 2>&1
                         settings delete system min_refresh_rate 2>/dev/null
                         touch "$RESTORE_FLAG" 2>/dev/null
-                        rm -f "$CACHED_RR" "$IDLE60_FLAG" 2>/dev/null
+                        rm -f "$CACHED_RR" "$IDLE60_FLAG" "$IDLE60_DROPPED_PKG" 2>/dev/null
                     fi
                 fi
                 ;;
@@ -127,7 +128,7 @@ _st="PERF"          # PERF | SAVE
 _drop_at=0          # when we last dropped
 _last_pkg=""
 
-cleanup() { kill $HB 2>/dev/null; rm -f "$TOUCH_TS" "$IDLE60_FLAG" "$RESTORE_FLAG" "$CACHED_RR"; log_msg "stopped"; exit 0; }
+cleanup() { kill $HB 2>/dev/null; rm -f "$TOUCH_TS" "$IDLE60_FLAG" "$IDLE60_DROPPED_PKG" "$RESTORE_FLAG" "$CACHED_RR"; log_msg "stopped"; exit 0; }
 trap cleanup INT TERM EXIT
 
 while true; do
@@ -145,7 +146,7 @@ while true; do
             RR=$(get_restore_mode "$PKG")
             service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
             settings delete system min_refresh_rate 2>/dev/null
-            rm -f "$IDLE60_FLAG" "$CACHED_RR" 2>/dev/null
+            rm -f "$IDLE60_FLAG" "$CACHED_RR" "$IDLE60_DROPPED_PKG" 2>/dev/null
             _st="PERF"; _drop_at=0
             log_msg "app-switch [$PKG] → RR $RR"
         fi
@@ -158,7 +159,7 @@ while true; do
             RR=$(get_restore_mode "$PKG")
             service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
             settings delete system min_refresh_rate 2>/dev/null
-            rm -f "$IDLE60_FLAG" 2>/dev/null
+            rm -f "$IDLE60_FLAG" "$IDLE60_DROPPED_PKG" 2>/dev/null
             _st="PERF"; _drop_at=0
             log_msg "spared [$PKG] → RR $RR"
         fi
@@ -187,6 +188,7 @@ DELAYS_FILE="/sdcard/DAVION_ENGINE/idle60_delays.txt"
             printf '%s' "$_target" > "$CACHED_RR" 2>/dev/null
             # Set IDLE60_FLAG FIRST so rr_guard won't race-restore before drop completes
             touch "$IDLE60_FLAG" 2>/dev/null
+            printf '%s' "$PKG" > "$IDLE60_DROPPED_PKG" 2>/dev/null
             # Drop to 60Hz: SF mode + settings triple-enforce
             service call SurfaceFlinger 1035 i32 "$MODE_60" >/dev/null 2>&1
             settings put system min_refresh_rate 60.0 2>/dev/null &
@@ -206,7 +208,7 @@ DELAYS_FILE="/sdcard/DAVION_ENGINE/idle60_delays.txt"
             RR=$(get_restore_mode "$PKG")
             service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
             settings delete system min_refresh_rate 2>/dev/null
-            rm -f "$IDLE60_FLAG" "$RESTORE_FLAG" "$CACHED_RR" 2>/dev/null
+            rm -f "$IDLE60_FLAG" "$RESTORE_FLAG" "$CACHED_RR" "$IDLE60_DROPPED_PKG" 2>/dev/null
             _st="PERF"; _drop_at=0
             log_msg "touch! [$PKG] → restored RR $RR (fallback)"
         fi
