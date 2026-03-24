@@ -153,6 +153,13 @@ restore_saturation() {
 # ── Get current foreground package ───────────────────────────
 get_foreground_pkg() {
     local pkg
+    # Fast path: read the shared file we write ourselves each tick.
+    # On the very first iteration it won't exist yet, so fall through.
+    if [ -f "/dev/.davion_last_fg_pkg" ]; then
+        pkg=$(cat "/dev/.davion_last_fg_pkg" 2>/dev/null | tr -d '[:space:]')
+        [ -n "$pkg" ] && echo "$pkg" && return 0
+    fi
+    # Fallback: slow dumpsys (also seeds the file for next time)
     pkg=$(dumpsys activity top 2>/dev/null \
         | grep -m1 "ACTIVITY" \
         | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" \

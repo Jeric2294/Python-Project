@@ -41,6 +41,9 @@ script_runner/encore_app_daemon
 script_runner/per_app_daemon
 script_runner/hot_reload_daemon
 script_runner/de_toast
+script_runner/de_reload
+script_runner/de_autoupdate
+script_runner/otg_daemon
 script_runner/cool_mode
 script_runner/global
 script_runner/display_mode
