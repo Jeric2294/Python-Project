@@ -25,7 +25,6 @@ pkill -f "GovThermal.*logcat" 2>/dev/null
 pkill -f "GovThermal.*dumpsys2" 2>/dev/null
 pkill -f "rr_guard" 2>/dev/null
 pkill -f "idle60_daemon" 2>/dev/null
-pkill -f "battery_guard" 2>/dev/null
 pkill -f "headset_daemon" 2>/dev/null
 pkill -f "otg_daemon" 2>/dev/null
 pkill -f "thermal_watchdog" 2>/dev/null
@@ -76,7 +75,6 @@ nohup sh "$MODDIR/script_runner/per_app_daemon" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/otg_daemon" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/thermal_watchdog" >> "$LOG" 2>&1 &

@@ -13,7 +13,6 @@ script_runner/idle60_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09
 script_runner/sf_controller https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/sf_controller
 script_runner/thermal_watchdog https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/thermal_watchdog
 script_runner/thermal_toggle https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/thermal_toggle
-script_runner/battery_guard https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/battery_guard
 script_runner/headset_daemon https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/headset_daemon
 script_runner/ai_thermal_predict https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/ai_thermal_predict
 script_runner/ai_adaptive_freq https://raw.githubusercontent.com/Jeric2294/DAVION09-ENGINE/main/script_runner/ai_adaptive_freq

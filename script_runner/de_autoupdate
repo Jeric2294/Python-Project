@@ -61,7 +61,6 @@ _needs_encore=0
 _needs_logcat=0
 _needs_rr_guard=0
 _needs_idle60=0
-_needs_battery_guard=0
 _needs_headset=0
 _needs_otg=0
 _needs_thermal_wdog=0
@@ -75,7 +74,6 @@ mark_restart() {
         logcat_detection/logcat|        logcat_detection/dumpsys2)       _needs_logcat=1 ;;
         script_runner/rr_guard)          _needs_rr_guard=1 ;;
         script_runner/idle60_daemon)     _needs_idle60=1 ;;
-        script_runner/battery_guard)     _needs_battery_guard=1 ;;
         script_runner/headset_daemon)    _needs_headset=1 ;;
         script_runner/otg_daemon)         _needs_otg=1 ;;
         script_runner/thermal_watchdog)   _needs_thermal_wdog=1 ;;

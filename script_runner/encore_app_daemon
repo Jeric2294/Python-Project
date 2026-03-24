@@ -1,23 +1,22 @@
 #!/system/bin/sh
 # =============================================================================
-#  ENCORE APP DAEMON — Per-App Tweaks Focus Monitor
-#  Applies gaming tweaks when an Encore-enabled app comes to foreground.
-#  Reverts when the app loses focus or exits.
+#  ENCORE APP DAEMON — Game Focus Monitor
+#  Activates DAVION ENGINE gaming mode when an Encore game enters foreground.
+#  Reverts to normal mode when the game loses focus or exits.
 #
-#  Reads:  /data/adb/.config/encore/gamelist.json
-#  Uses:   DAVION_ENGINE gaming/normal mode scripts
-#          DAVION_ENGINE per-app RR/brightness/volume files
+#  Scope: GAME MODE ONLY — CPU profile, DND, saturation.
+#  Per-app settings (brightness, RR, volume, conn, kill-others, cache)
+#  are handled exclusively by per_app_daemon.
+#
+#  Reads: /data/adb/.config/encore/gamelist.json
 # =============================================================================
 
 MODDIR="/data/adb/modules/GovThermal"
 LOG="/sdcard/GovThermal/GovThermal.log"
-RR_DIR="/sdcard/DAVION_ENGINE/refresh_locks"
 CFG_DIR="/sdcard/GovThermal/config"
-UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
-UNIVERSAL_BRIGHT_FILE="/sdcard/DAVION_ENGINE/universal_brightness.txt"
-UNIVERSAL_VOL_FILE="/sdcard/DAVION_ENGINE/universal_vol.txt"
 ENCORE_GAMELIST="/data/adb/.config/encore/gamelist.json"
 ENCORE_CFG="/data/adb/.config/encore/config.json"
+DE_TOAST="$MODDIR/script_runner/de_toast"
 
 # Script paths
 GAMING_PROP="$MODDIR/DAVION_ENGINE/AI_MODE/gaming_mode/gaming_prop"
@@ -28,27 +27,21 @@ NORMAL_CPUSET="$MODDIR/DAVION_ENGINE/AI_MODE/normal_mode/normal_cpuset"
 
 # State tracking
 _active_pkg=""
-_vol_last_fg_pkg=""
-_was_bg=""       # tracks if active game went to background
+_was_bg=""
 _active_mode=""   # "gaming" | "lite" | ""
 _dnd_active=0
-_ko_cc_last_pkg=""  # last pkg for kill-others + cache-clear checks
 
 log_msg() { echo "[$(date '+%H:%M:%S')] [ENCORE-DAEMON] $1" >> "$LOG"; }
 
-# ── System-level toast via cmd notification ───────────────────
-# Usage: de_notify "Message" ["Title"] ["success|warn|error|info"]
+# ── Toast notification ────────────────────────────────────────
 de_notify() {
-    local msg="$1"
-    local title="${2:-DAVION ENGINE}"
-    local type="${3:-info}"
+    local msg="$1" title="${2:-DAVION ENGINE}" type="${3:-info}"
     [ -x "$DE_TOAST" ] && "$DE_TOAST" "$msg" "$title" "$type" 2>/dev/null &
 }
 
-# ── Get human-readable app label from package name ────────────
+# ── Human-readable app label ──────────────────────────────────
 get_app_label() {
-    local pkg="$1"
-    local label
+    local pkg="$1" label
     label=$(pm dump "$pkg" 2>/dev/null \
         | grep -m1 "nonLocalizedLabel" \
         | sed 's/.*nonLocalizedLabel=//' \
@@ -57,211 +50,20 @@ get_app_label() {
     echo "$pkg"
 }
 
-# ── Kill other foreground apps for a package ──────────────────
-# ── Global toggle helpers ──────────────────────────────────────
-ko_global_enabled() {
-    local v
-    v=$(tr -d '[:space:]' < "$CFG_DIR/ko_global_enabled" 2>/dev/null)
-    [ "$v" != "0" ]   # default ON if file missing
-}
-cache_global_enabled() {
-    local v
-    v=$(tr -d '[:space:]' < "$CFG_DIR/cache_global_enabled" 2>/dev/null)
-    [ "$v" != "0" ]   # default ON if file missing
-}
-# Check if pkg is a game (uses full WebUI-generated list, falls back to Encore list)
-is_game_pkg() {
-    local pkg="$1"
-    local gl="$CFG_DIR/gl_pkgs"
-    if [ -f "$gl" ]; then
-        grep -qFx "$pkg" "$gl" 2>/dev/null && return 0
-    else
-        gamelist_has_pkg "$pkg" && return 0
-    fi
-    return 1
-}
-
-# Reads $RR_DIR/$pkg.killothers (flag) + $RR_DIR/$pkg.killothers_bl (spare list)
-kill_others_for_pkg() {
-    local pkg="$1"
-    [ -f "$RR_DIR/$pkg.killothers" ] || return
-
-    local spare_list="$pkg"
-    if [ -f "$RR_DIR/$pkg.killothers_bl" ]; then
-        # FIX: strip \r — WebUI writes CRLF; stray \r breaks grep -Fx matching
-        spare_list="$spare_list
-$(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
-    fi
-
-    local killed=0
-    local skipped=0
-    local killed_names=""
-    local running
-    running=$(dumpsys activity processes 2>/dev/null \
-        | grep "ProcessRecord" \
-        | grep -oE 'com\.[a-zA-Z0-9._]+|[a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9._]+' \
-        | sort -u)
-
-    for target in $running; do
-        echo "$spare_list" | grep -qFx "$target" && continue
-        echo "$target" | grep -q '\.' || continue
-        case "$target" in
-            android|com.android.systemui|com.android.phone|\
-            com.android.settings|com.android.launcher*|\
-            com.google.android.gms|com.google.android.gsf) continue ;;
-        esac
-
-        # Kill app — check PID before to know if it was running (for notification)
-        local _pre_pids
-        _pre_pids=$(pidof "$target" 2>/dev/null)
-        am force-stop "$target" 2>/dev/null
-        if [ -n "$_pre_pids" ]; then
-            killed=$((killed + 1))
-            local short_name
-            short_name=$(echo "$target" | awk -F. '{print substr($NF,1,6)}')
-            if [ -z "$killed_names" ]; then
-                killed_names="$short_name"
-            else
-                killed_names="$killed_names $short_name"
-            fi
-            log_msg "  KO: killed $target"
-        else
-            skipped=$((skipped + 1))
-            log_msg "  KO: $target already stopped — not in notification"
-        fi
-    done
-
-    local label
-    label=$(get_app_label "$pkg")
-    if [ "$killed" -gt 0 ]; then
-        # Show count + list of actually-killed apps only (not already-stopped ones)
-        de_notify "${killed} killed: ${killed_names}" "KILL OTHERS · ${label}" "warn"
-        log_msg "Kill Others: $killed killed, $skipped skipped (already stopped) — for $pkg"
-    else
-        log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
-    fi
-}
-# ── Clear selected app caches on launch ──────────────────────────────────
-# File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
-# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
-#
-# Clears only the apps that are checked/selected in the Cache Manager panel.
-# Same list that CLEAR SELECTED button in the panel uses.
-clear_cache_for_pkg() {
-    local pkg="$1"
-    [ -f "$RR_DIR/$pkg.cacheclear" ] || return
-
-    local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
-
-    # No selection = nothing to clear
-    [ -f "$SELECTED_FILE" ] || {
-        log_msg "Cache Clear: no selection file — skipping for $pkg"
-        return
-    }
-
-    local cleared=0
-    local skipped=0
-    local target total_kb did_clear seen_real real_dir kb cache_dir
-
-    while IFS= read -r target; do
-        # Strip CRLF from WebUI-written file
-        target=$(printf '%s' "$target" | tr -d '\r')
-        { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
-
-        # Always skip the launching app itself
-        [ "$target" = "$pkg" ] && { skipped=$((skipped + 1)); continue; }
-
-        # Skip system-critical packages
-        case "$target" in
-            android|com.android.systemui|com.android.phone|\
-            com.android.settings|com.android.launcher*|\
-            com.google.android.gms|com.google.android.gsf|\
-            com.topjohnwu.magisk|com.android.shell|\
-            com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
-        esac
-
-        total_kb=0
-        did_clear=0
-        seen_real=""
-
-        for cache_dir in \
-            "/data/user/0/$target/cache" \
-            "/data/user_de/0/$target/cache" \
-            "/data/data/$target/cache"; do
-            [ -d "$cache_dir" ] || continue
-            real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
-            case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
-            seen_real="${seen_real}|${real_dir}|"
-            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
-            [ "${kb:-0}" = "0" ] && continue
-            rm -rf "${cache_dir:?}/"* 2>/dev/null
-            total_kb=$(( total_kb + ${kb:-0} ))
-            did_clear=1
-        done
-
-        if [ "$did_clear" = "1" ]; then
-            cleared=$((cleared + 1))
-            log_msg "  CacheClr: $target (~${total_kb}KB)"
-        else
-            skipped=$((skipped + 1))
-        fi
-
-    done < "$SELECTED_FILE"
-
-    local label
-    label=$(get_app_label "$pkg")
-    if [ "$cleared" -gt 0 ]; then
-        de_notify "${cleared} cache(s) cleared" "${label}" "success"
-        log_msg "Cache Clear: $cleared cleared, $skipped skipped — for $pkg"
-    else
-        log_msg "Cache Clear: nothing to clear ($skipped skipped) — for $pkg"
-    fi
-}
-
-# ── Get current foreground package ───────────────────────────
-get_foreground_pkg() {
-    # Primary: dumpsys activity (most reliable)
-    local pkg
-    pkg=$(dumpsys activity top 2>/dev/null \
-        | grep -m1 "ACTIVITY" \
-        | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" \
-        | head -1)
-
-    # Fallback: top-app cpuset
-    if [ -z "$pkg" ]; then
-        local pid
-        for p in /proc/[0-9]*/cpuset; do
-            grep -q "top-app" "$p" 2>/dev/null || continue
-            pid=$(echo "$p" | cut -d/ -f3)
-            pkg=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' '\n' | head -1)
-            # skip system/surfaceflinger/systemui
-            case "$pkg" in
-                com.android.systemui|android|system_server|surfaceflinger) pkg="" ; continue ;;
-            esac
-            [ -n "$pkg" ] && break
-        done
-    fi
-    echo "$pkg"
-}
-
-# ── Read gamelist.json and check if a pkg is enabled ─────────
+# ── Gamelist helpers ──────────────────────────────────────────
 gamelist_has_pkg() {
     local pkg="$1"
     [ -f "$ENCORE_GAMELIST" ] || return 1
     grep -q "\"$pkg\"" "$ENCORE_GAMELIST" 2>/dev/null
 }
 
-# Returns the lite_mode value (true/false) for a pkg
 get_lite_mode() {
     local pkg="$1"
-    # FIX: was "|| echo "false"; return" — semicolon made return ALWAYS execute,
-    # so the awk block below was unreachable even when the file existed.
     [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
-    # Extract the block for this pkg and find lite_mode
     local val
     val=$(awk -v p="\"$pkg\"" '
         $0 ~ p { found=1 }
-        found && /lite_mode/ { 
+        found && /lite_mode/ {
             match($0, /lite_mode.*:(true|false)/, a)
             if (a[1]) { print a[1]; exit }
         }
@@ -270,10 +72,8 @@ get_lite_mode() {
     echo "${val:-false}"
 }
 
-# Returns the enable_dnd value (true/false) for a pkg
 get_enable_dnd() {
     local pkg="$1"
-    # FIX: same always-early-return bug as get_lite_mode
     [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
     local val
     val=$(awk -v p="\"$pkg\"" '
@@ -287,9 +87,7 @@ get_enable_dnd() {
     echo "${val:-false}"
 }
 
-# Check if enforce_lite_mode is globally set in config.json
 get_global_enforce_lite() {
-    # FIX: same always-early-return bug as get_lite_mode
     [ -f "$ENCORE_CFG" ] || { echo "false"; return; }
     local val
     val=$(grep -o '"enforce_lite_mode"[[:space:]]*:[[:space:]]*[a-z]*' "$ENCORE_CFG" 2>/dev/null \
@@ -297,199 +95,7 @@ get_global_enforce_lite() {
     echo "${val:-false}"
 }
 
-# ── Apply per-app RR lock ─────────────────────────────────────
-apply_per_app_rr() {
-    local pkg="$1"
-    local mode_file="$RR_DIR/$pkg.mode"
-    # Skip only if idle60_daemon dropped THIS EXACT pkg — not a different app
-    # (user switching to a different app should always get their RR applied)
-    if [ -f "/dev/.davion_idle60_dropped" ]; then
-        _dropped_pkg=$(cat /dev/.davion_idle60_dropped_pkg 2>/dev/null | tr -d '[:space:]')
-        [ "$_dropped_pkg" = "$pkg" ] && return 0
-    fi
-    if [ -f "$mode_file" ]; then
-        local mode_id
-        mode_id=$(tr -d '[:space:]' < "$mode_file")
-        [ -n "$mode_id" ] && [ "$mode_id" -eq "$mode_id" ] 2>/dev/null && \
-            service call SurfaceFlinger 1035 i32 "$mode_id" >/dev/null 2>&1 && \
-            log_msg "  RR locked: mode $mode_id for $pkg"
-    fi
-}
-
-# ── Restore RR to universal or auto ──────────────────────────
-restore_rr() {
-    if [ -f "$UNIVERSAL_RR_FILE" ]; then
-        local uid
-        uid=$(tr -d '[:space:]' < "$UNIVERSAL_RR_FILE")
-        [ -n "$uid" ] && [ "$uid" -eq "$uid" ] 2>/dev/null && \
-            service call SurfaceFlinger 1035 i32 "$uid" >/dev/null 2>&1
-    else
-        service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1
-    fi
-}
-
-# ── Apply per-app brightness ──────────────────────────────────
-apply_per_app_brightness() {
-    local pkg="$1"
-    local bright_file="$RR_DIR/$pkg.bright"
-    if [ -f "$bright_file" ]; then
-        local bv
-        bv=$(tr -d '[:space:]' < "$bright_file")
-        if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
-            settings put system screen_brightness_mode 0 2>/dev/null
-            settings put system screen_brightness "$bv" 2>/dev/null
-            log_msg "  Brightness locked: $bv for $pkg"
-        fi
-    fi
-}
-
-# ── Restore brightness to universal or auto ───────────────────
-restore_brightness() {
-    if [ -f "$UNIVERSAL_BRIGHT_FILE" ]; then
-        local ub
-        ub=$(tr -d '[:space:]' < "$UNIVERSAL_BRIGHT_FILE")
-        if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null; then
-            settings put system screen_brightness_mode 0 2>/dev/null
-            settings put system screen_brightness "$ub" 2>/dev/null
-            return
-        fi
-    fi
-    settings put system screen_brightness_mode 1 2>/dev/null
-}
-
-# ── Apply per-app volume ──────────────────────────────────────
-# DISABLED: per_app_daemon handles volume with better logic & safety mechanisms
-# Having TWO daemons apply volume causes conflicts
-apply_per_app_volume() {
-    local pkg="$1"
-    # Volume is now handled EXCLUSIVELY by per_app_daemon
-    # This function is kept for compatibility but does nothing
-    return 0
-}
-
-# ── Restore volume to universal or do nothing ─────────────────
-# DISABLED: per_app_daemon handles all volume logic (per-app + universal fallback)
-# This function is kept for compatibility but does nothing
-restore_volume() {
-    # Volume restoration is now handled EXCLUSIVELY by per_app_daemon
-    # This prevents conflicts between two daemons trying to manage volume
-    return 0
-}
-
-GLOBAL_SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
-_encore_last_sat_pkg=""
-
-# ── Apply per-app saturation ──────────────────────────────────
-apply_per_app_saturation() {
-    local pkg="$1"
-    local sat_file="$RR_DIR/$pkg.sat"
-    if [ -f "$sat_file" ]; then
-        local sv
-        sv=$(tr -d '[:space:]' < "$sat_file")
-        if [ -n "$sv" ] && [ "$sv" -ge 0 ] 2>/dev/null && [ "$sv" -le 20 ] 2>/dev/null; then
-            local sat_val
-            sat_val=$(awk -v raw="$sv" 'BEGIN{printf "%.1f", raw / 10}')
-            service call SurfaceFlinger 1022 f "$sat_val" >/dev/null 2>&1
-            _encore_last_sat_pkg="$pkg"
-            log_msg "  Saturation locked: ${sat_val}x for $pkg"
-        fi
-    fi
-}
-
-# ── Restore saturation to global or default ───────────────────
-restore_saturation() {
-    [ -z "$_encore_last_sat_pkg" ] && return   # nothing was applied — skip
-    if [ -f "$GLOBAL_SAT_FILE" ]; then
-        local gs
-        gs=$(tr -d '[:space:]' < "$GLOBAL_SAT_FILE")
-        if [ -n "$gs" ]; then
-            service call SurfaceFlinger 1022 f "$gs" >/dev/null 2>&1
-            log_msg "  Saturation restored: ${gs}x (global)"
-            _encore_last_sat_pkg=""
-            return
-        fi
-    fi
-    service call SurfaceFlinger 1022 f 1.0 >/dev/null 2>&1
-    _encore_last_sat_pkg=""
-}
-
-# ── Per-app Connection on Launch ──────────────────────────────
-# WiFi/Data are only enabled when currently OFF.
-# We track WHICH pkg enabled each so we only disable it when that app leaves.
-_conn_last_fg_pkg=""
-_conn_wifi_enabled_by=""   # pkg that turned WiFi ON; empty = we didn't touch it
-_conn_data_enabled_by=""   # pkg that turned Data ON;  empty = we didn't touch it
-
-# ── Conn-on-Launch helpers ────────────────────────────────────
-
-# Returns 0 if WiFi is currently on, 1 if off/unknown
-is_wifi_on() {
-    local w
-    w=$(settings get global wifi_on 2>/dev/null | tr -d '[:space:]')
-    [ "$w" = "1" ] && return 0
-    return 1
-}
-
-# Returns 0 if mobile data is currently on, 1 if off/unknown
-is_data_on() {
-    local d
-    d=$(settings get global mobile_data 2>/dev/null | tr -d '[:space:]')
-    [ "$d" = "1" ] && return 0
-    return 1
-}
-
-# Enable WiFi/Data based on .conn file — ONLY if currently OFF
-apply_per_app_conn() {
-    local pkg="$1"
-    local conn_file="$RR_DIR/$pkg.conn"
-    [ -f "$conn_file" ] || return
-    local ctype
-    ctype=$(tr -d '[:space:]' < "$conn_file")
-    case "$ctype" in
-        wifi|both)
-            if ! is_wifi_on; then
-                svc wifi enable 2>/dev/null
-                cmd wifi enable-wifi 2>/dev/null || true
-                _conn_wifi_enabled_by="$pkg"
-                log_msg "  Conn: WiFi enabled for $pkg"
-                de_notify "WiFi enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
-            else
-                log_msg "  Conn: WiFi already ON — skipping for $pkg"
-            fi
-            ;;
-    esac
-    case "$ctype" in
-        data|both)
-            if ! is_data_on; then
-                svc data enable 2>/dev/null
-                _conn_data_enabled_by="$pkg"
-                log_msg "  Conn: Data enabled for $pkg"
-                de_notify "Mobile Data enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
-            else
-                log_msg "  Conn: Data already ON — skipping for $pkg"
-            fi
-            ;;
-    esac
-}
-
-# Disable WiFi/Data on app leave — ONLY if WE were the ones who enabled it
-restore_conn() {
-    local leaving_pkg="$1"
-    if [ -n "$_conn_wifi_enabled_by" ] && [ "$_conn_wifi_enabled_by" = "$leaving_pkg" ]; then
-        svc wifi disable 2>/dev/null
-        cmd wifi disable-wifi 2>/dev/null || true
-        _conn_wifi_enabled_by=""
-        log_msg "  Conn: WiFi restored OFF (was enabled for $leaving_pkg)"
-        de_notify "WiFi auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
-    fi
-    if [ -n "$_conn_data_enabled_by" ] && [ "$_conn_data_enabled_by" = "$leaving_pkg" ]; then
-        svc data disable 2>/dev/null
-        _conn_data_enabled_by=""
-        log_msg "  Conn: Data restored OFF (was enabled for $leaving_pkg)"
-        de_notify "Data auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
-    fi
-}
-
+# ── DND ──────────────────────────────────────────────────────
 enable_dnd() {
     cmd notification set-dnd on 2>/dev/null || \
     cmd notification set_ringer_mode 0 2>/dev/null || \
@@ -507,42 +113,89 @@ disable_dnd() {
     log_msg "  DND: disabled"
 }
 
-# ── Activate tweaks for a specific app ───────────────────────
-activate_tweaks() {
+# ── Per-app saturation (game visual effect) ───────────────────
+GLOBAL_SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
+RR_DIR="/sdcard/DAVION_ENGINE/refresh_locks"
+_encore_last_sat_pkg=""
+
+apply_per_app_saturation() {
     local pkg="$1"
-    local lite_mode="$2"
-    local enable_dnd_val="$3"
+    local sat_file="$RR_DIR/$pkg.sat"
+    if [ -f "$sat_file" ]; then
+        local sv
+        sv=$(tr -d '[:space:]' < "$sat_file")
+        if [ -n "$sv" ] && [ "$sv" -ge 0 ] 2>/dev/null && [ "$sv" -le 20 ] 2>/dev/null; then
+            local sat_val
+            sat_val=$(awk -v raw="$sv" 'BEGIN{printf "%.1f", raw / 10}')
+            service call SurfaceFlinger 1022 f "$sat_val" >/dev/null 2>&1
+            _encore_last_sat_pkg="$pkg"
+            log_msg "  Saturation locked: ${sat_val}x for $pkg"
+        fi
+    fi
+}
 
-    log_msg "Activating tweaks for: $pkg (lite=$lite_mode, dnd=$enable_dnd_val)"
+restore_saturation() {
+    [ -z "$_encore_last_sat_pkg" ] && return
+    if [ -f "$GLOBAL_SAT_FILE" ]; then
+        local gs
+        gs=$(tr -d '[:space:]' < "$GLOBAL_SAT_FILE")
+        if [ -n "$gs" ]; then
+            service call SurfaceFlinger 1022 f "$gs" >/dev/null 2>&1
+            log_msg "  Saturation restored: ${gs}x (global)"
+            _encore_last_sat_pkg=""
+            return
+        fi
+    fi
+    service call SurfaceFlinger 1022 f 1.0 >/dev/null 2>&1
+    _encore_last_sat_pkg=""
+}
 
-    # Apply the right CPU/system profile
+# ── Get current foreground package ───────────────────────────
+get_foreground_pkg() {
+    local pkg
+    pkg=$(dumpsys activity top 2>/dev/null \
+        | grep -m1 "ACTIVITY" \
+        | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" \
+        | head -1)
+    if [ -z "$pkg" ]; then
+        local pid
+        for p in /proc/[0-9]*/cpuset; do
+            grep -q "top-app" "$p" 2>/dev/null || continue
+            pid=$(echo "$p" | cut -d/ -f3)
+            pkg=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' '\n' | head -1)
+            case "$pkg" in
+                com.android.systemui|android|system_server|surfaceflinger)
+                    pkg="" ; continue ;;
+            esac
+            [ -n "$pkg" ] && break
+        done
+    fi
+    echo "$pkg"
+}
+
+# ── Activate gaming mode for a game ──────────────────────────
+activate_tweaks() {
+    local pkg="$1" lite_mode="$2" enable_dnd_val="$3"
+    log_msg "Activating game mode: $pkg (lite=$lite_mode, dnd=$enable_dnd_val)"
+
     if [ "$lite_mode" = "true" ]; then
-        # Lite mode: battery-focused, lower frequencies
         [ -x "$LITE_GAMING" ] && sh "$LITE_GAMING" >/dev/null 2>&1 &
         _active_mode="lite"
         log_msg "  Mode: LITE GAMING"
     else
-        # Full gaming mode: performance props + cpuset
         [ -x "$GAMING_PROP" ]   && sh "$GAMING_PROP"   >/dev/null 2>&1
         [ -x "$GAMING_CPUSET" ] && sh "$GAMING_CPUSET" >/dev/null 2>&1
         _active_mode="gaming"
         log_msg "  Mode: GAMING"
     fi
 
-    # Per-app peripherals
-    apply_per_app_rr "$pkg"
-    apply_per_app_brightness "$pkg"
-    apply_per_app_volume "$pkg"
     apply_per_app_saturation "$pkg"
-
-    # DND
     [ "$enable_dnd_val" = "true" ] && enable_dnd
 
     _active_pkg="$pkg"
-    # Signal to battery_guard not to override the governor
+    # Signal flag for other daemons (per_app, idle60, rr_guard, etc.)
     echo "$pkg" > /dev/.encore_tweaks_active 2>/dev/null
 
-    # ── System toast: notify user that tweaks are active ──────
     local _label
     _label=$(get_app_label "$pkg")
     if [ "$lite_mode" = "true" ]; then
@@ -550,158 +203,45 @@ activate_tweaks() {
     else
         de_notify "Gaming Mode → ${_label}" "DAVION ENGINE" "success"
     fi
-
-    # ── Kill Others: force-stop other apps now ────────────────
-    kill_others_for_pkg "$pkg" &
-
-    # ── Cache Clear: clear all other user app caches if configured ───────────
-    [ -f "$RR_DIR/$pkg.cacheclear" ] && clear_cache_for_pkg "$pkg" &
 }
 
-# ── Deactivate tweaks and revert to normal ────────────────────
+# ── Deactivate gaming mode, revert to normal ─────────────────
 deactivate_tweaks() {
     local pkg="$1"
-    log_msg "Deactivating tweaks for: $pkg"
+    log_msg "Deactivating game mode: $pkg"
 
-    # Revert CPU/system profile
     [ -x "$NORMAL_PROP" ]   && sh "$NORMAL_PROP"   >/dev/null 2>&1
     [ -x "$NORMAL_CPUSET" ] && sh "$NORMAL_CPUSET" >/dev/null 2>&1
 
-    # Restore per-app peripherals
-    restore_rr
-    restore_brightness
-    restore_volume
     restore_saturation
-
-    # DND
     disable_dnd
 
     _active_pkg=""
     _active_mode=""
-    # Reset vol tracker so next foreground app always re-applies its volume
-    _vol_last_fg_pkg=""
     rm -f /dev/.encore_tweaks_active 2>/dev/null
     log_msg "Normal mode restored"
-
-    # ── System toast: notify user tweaks are off ──────────────
     de_notify "Normal mode restored" "DAVION ENGINE" "info"
 }
 
 # ── Main monitor loop ─────────────────────────────────────────
-log_msg "Started — monitoring foreground app for Encore tweaks"
+log_msg "Started — monitoring foreground for Encore games"
 FLAG_FILE="/dev/.encore_gamelist_updated"
-
-# Logcat per-app watcher (parallel) -- volume, brightness, RR, timeout, conn, ko, cache, encore
-(
-    logcat -b events -T 1 2>/dev/null | while IFS= read -r line; do
-        pkg=""
-        case "$line" in
-            *"input_focus"*"Focus entering"*)
-                pkg=$(echo "$line" | grep -oE '[a-zA-Z0-9._]+/[a-zA-Z0-9._]+' | cut -d'/' -f1 | tail -n 1)
-                ;;
-            *"wm_on_resume_called"*|*"am_on_resume_called"*|*"am_resume_activity"*)
-                pkg=$(echo "$line" | grep -oE '\[[0-9]+,[a-zA-Z0-9._]+' | grep -oE '[a-zA-Z0-9._]+$')
-                ;;
-        esac
-        [ -z "$pkg" ] && continue
-        echo "$pkg" | grep -q '\.' || continue
-        case "$pkg" in
-            android|com.android.systemui|com.android.phone|com.android.shell|com.topjohnwu.magisk|com.transsion.hilauncher|com.android.launcher*) continue ;;
-        esac
-        echo "$pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
-        # Volume handled by encore_app_daemon main loop to avoid conflicts
-        # Brightness
-        _bf="$RR_DIR/$pkg.bright"
-        if [ -f "$_bf" ]; then
-            _bv=$(tr -d '[:space:]' < "$_bf")
-            if [ -n "$_bv" ] && [ "$_bv" -ge 0 ] 2>/dev/null; then
-                settings put system screen_brightness_mode 0 2>/dev/null
-                settings put system screen_brightness "$_bv" 2>/dev/null
-                log_msg "  Bright(lc): $_bv for $pkg"
-            fi
-        fi
-        # Refresh Rate — skip only if idle60 dropped THIS EXACT pkg
-        _mf="$RR_DIR/$pkg.mode"
-        _lc_dropped_pkg=$(cat /dev/.davion_idle60_dropped_pkg 2>/dev/null | tr -d '[:space:]')
-        if [ -f "$_mf" ] && { [ ! -f "/dev/.davion_idle60_dropped" ] || [ "$_lc_dropped_pkg" != "$pkg" ]; }; then
-            _mid=$(tr -d '[:space:]' < "$_mf")
-            [ -n "$_mid" ] && [ "$_mid" -eq "$_mid" ] 2>/dev/null && service call SurfaceFlinger 1035 i32 "$_mid" >/dev/null 2>&1
-            log_msg "  RR(lc): mode $_mid for $pkg"
-        fi
-        # Volume
-        # DISABLED: per_app_daemon handles volume with better logic
-        # Applying volume here causes conflicts - removed for stability
-        # _vf="$RR_DIR/$pkg.vol"
-        # if [ -f "$_vf" ]; then
-        #     _vv=$(tr -d '[:space:]' < "$_vf")
-        #     if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null; then
-        #         media volume --stream 3 --set "$_vv" 2>/dev/null || settings put system volume_music "$_vv" 2>/dev/null
-        #         cmd media_session volume --stream 3 --set "$_vv" 2>/dev/null; true
-        #         log_msg "  Vol(lc): $_vv for $pkg"
-        #     fi
-        # fi
-        # Connection on Launch
-        _cf="$RR_DIR/$pkg.conn"
-        if [ -f "$_cf" ]; then
-            _cv=$(tr -d '[:space:]' < "$_cf")
-            case "$_cv" in
-                wifi) svc wifi enable 2>/dev/null ; log_msg "  Conn(lc): wifi for $pkg" ;;
-                data) svc data enable 2>/dev/null ; log_msg "  Conn(lc): data for $pkg" ;;
-                both) svc wifi enable 2>/dev/null; svc data enable 2>/dev/null ; log_msg "  Conn(lc): wifi+data for $pkg" ;;
-            esac
-        fi
-        # Kill Others
-        if [ -f "$RR_DIR/$pkg.killothers" ]; then
-            if is_game_pkg "$pkg" || ko_global_enabled; then
-                kill_others_for_pkg "$pkg"
-                log_msg "  KO(lc): ran for $pkg"
-            else
-                log_msg "  KO(lc): skipped for $pkg — global toggle OFF"
-            fi
-        fi
-        # Cache Clear — fires if this app has cache clear enabled
-        # New behavior: clears ALL user app caches except spare list
-        if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            if cache_global_enabled; then
-                clear_cache_for_pkg "$pkg"
-                log_msg "  Cache(lc): ran for $pkg"
-            else
-                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
-            fi
-        fi
-        # Encore Gaming Mode
-        if gamelist_has_pkg "$pkg"; then
-            _ll=$(get_lite_mode "$pkg")
-            _gl=$(get_global_enforce_lite)
-            [ "$_gl" = "true" ] && _ll="true"
-            _dnd=$(get_enable_dnd "$pkg")
-            activate_tweaks "$pkg" "$_ll" "$_dnd"
-            log_msg "  Encore(lc): activated for $pkg"
-        fi
-    done
-) &
-_logcat_vol_pid=$!
-log_msg "Logcat per-app watcher started (PID $_logcat_vol_pid)"
-
 
 while true; do
 
-    # Skip if gamelist doesn't exist (Encore not installed / no apps configured)
+    # Skip if gamelist doesn't exist
     if [ ! -f "$ENCORE_GAMELIST" ]; then
         sleep 3
         continue
     fi
 
-    # If WebUI just updated gamelist, force re-evaluation of current app
+    # Live update: gamelist changed while running
     if [ -f "$FLAG_FILE" ]; then
         rm -f "$FLAG_FILE"
-        # Force re-check by clearing cached pkg so the loop re-evaluates
         if [ -n "$_active_pkg" ]; then
             if ! gamelist_has_pkg "$_active_pkg"; then
-                # App was removed from gamelist while it was focused — revert
                 deactivate_tweaks "$_active_pkg"
             else
-                # Settings changed for active app — reapply with new values
                 local_lite=$(get_lite_mode "$_active_pkg")
                 global_lite=$(get_global_enforce_lite)
                 [ "$global_lite" = "true" ] && local_lite="true"
@@ -712,75 +252,22 @@ while true; do
         fi
     fi
 
-    # ── Vol retrigger — WebUI signals after saving vol config ──
-    if [ -f /dev/.davion_vol_retrigger ]; then
-        retrig_pkg=$(cat /dev/.davion_vol_retrigger 2>/dev/null | tr -d '[:space:]')
-        rm -f /dev/.davion_vol_retrigger 2>/dev/null
-        if [ -n "$retrig_pkg" ] && [ -f "$RR_DIR/$retrig_pkg.vol" ]; then
-            apply_per_app_volume "$retrig_pkg"
-            # Force re-check next tick
-            _vol_last_fg_pkg=""
-            log_msg "Vol retrigger: re-applied for $retrig_pkg"
-        fi
-    fi
-
     current_pkg=$(get_foreground_pkg)
-    # ── Write shared foreground pkg for headset_daemon ────────
+    # Write shared foreground pkg for other daemons
     echo "$current_pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
 
-    # ── Per-app Connection on Launch — fires ONLY on real app change ──
-    # Rule: WiFi/Data is enabled ONLY if currently OFF.
-    # If WiFi is already ON (enabled by another app or user), skip — don't touch it.
-    # Restore (disable) ONLY if we were the ones who enabled it.
-    if [ "$current_pkg" != "$_conn_last_fg_pkg" ]; then
-        _prev_conn_pkg="$_conn_last_fg_pkg"
-        _conn_last_fg_pkg="$current_pkg"
-        # Restore conn for the app that just left focus
-        [ -n "$_prev_conn_pkg" ] && restore_conn "$_prev_conn_pkg"
-        # Apply conn for new foreground app (skips if wifi/data already on)
-        [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.conn" ] && \
-            apply_per_app_conn "$current_pkg"
-    fi
-
-    # ── Kill Others + Cache Clear — fires on real app change ─────────────
-    # Encore apps are handled inside activate_tweaks — skip them here to avoid
-    # double execution. Non-Encore apps with these flags are handled here.
-    if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
-        _ko_cc_last_pkg="$current_pkg"
-        if [ -n "$current_pkg" ]; then
-            # Kill Others — non-Encore apps only (Encore handled in activate_tweaks)
-            if ! gamelist_has_pkg "$current_pkg"; then
-                if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
-                    if ko_global_enabled; then
-                        kill_others_for_pkg "$current_pkg" &
-                    fi
-                fi
-                # Cache clear — non-Encore apps only (flag alone is enough; spare list is optional)
-                if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
-                    if cache_global_enabled; then
-                        clear_cache_for_pkg "$current_pkg" &
-                    fi
-                fi
-            fi
-        fi
-    fi
-
-    # ── Detect if active game went to background ─────────────
+    # ── Detect if active game went to background ──────────────
     if [ -n "$_active_pkg" ] && [ "$current_pkg" != "$_active_pkg" ]; then
-        # Game went to background — mark it
         _was_bg="$_active_pkg"
     fi
 
-    # ── Game returned from background → re-apply tweaks ──────
+    # ── Game returned from background — re-apply ──────────────
     if [ -n "$_was_bg" ] && [ "$current_pkg" = "$_was_bg" ]; then
-        log_msg "[ENCORE-DAEMON] Game returned from bg: $current_pkg — re-applying tweaks"
+        log_msg "Game returned from bg: $current_pkg — re-applying"
         local_lite=$(get_lite_mode "$current_pkg")
         global_lite=$(get_global_enforce_lite)
         [ "$global_lite" = "true" ] && local_lite="true"
         dnd_val=$(get_enable_dnd "$current_pkg")
-        # FIX: deactivate whatever is currently active (_active_pkg), not current_pkg.
-        # When A→B→A, _active_pkg=B here — deactivate_tweaks(current_pkg=A) would
-        # skip B's mode revert and leave state inconsistent.
         [ -n "$_active_pkg" ] && deactivate_tweaks "$_active_pkg"
         activate_tweaks "$current_pkg" "$local_lite" "$dnd_val"
         _was_bg=""
@@ -791,50 +278,18 @@ while true; do
     # Nothing changed
     [ "$current_pkg" = "$_active_pkg" ] && { sleep 1; continue; }
 
-    # ── Previous app lost focus → deactivate its tweaks ──────
+    # ── Previous game lost focus ──────────────────────────────
     if [ -n "$_active_pkg" ] && [ "$_active_pkg" != "$current_pkg" ]; then
         deactivate_tweaks "$_active_pkg"
     fi
 
-    # ── New app in foreground → check if it has tweaks ───────
+    # ── New foreground app — is it an Encore game? ────────────
     if [ -n "$current_pkg" ] && gamelist_has_pkg "$current_pkg"; then
-        # Determine effective lite_mode (global override wins)
         local_lite=$(get_lite_mode "$current_pkg")
         global_lite=$(get_global_enforce_lite)
-        if [ "$global_lite" = "true" ]; then
-            effective_lite="true"
-        else
-            effective_lite="$local_lite"
-        fi
+        [ "$global_lite" = "true" ] && local_lite="true"
         dnd_val=$(get_enable_dnd "$current_pkg")
-        activate_tweaks "$current_pkg" "$effective_lite" "$dnd_val"
-    fi
-
-    # ── Per-app Volume — apply AFTER deactivate/activate to avoid override ──
-    if [ "$current_pkg" != "$_vol_last_fg_pkg" ]; then
-        _prev_vol_pkg="$_vol_last_fg_pkg"
-        _vol_last_fg_pkg="$current_pkg"
-        
-        if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.vol" ]; then
-            # Small delay — let app acquire audio focus before forcing volume
-            (sleep 0.5 && apply_per_app_volume "$current_pkg") &
-        else
-            # No per-app vol for this app — check if we should restore universal
-            # We restore if the PREVIOUS app had a per-app volume applied
-            # OR if we are on a launcher/system app (baseline restore)
-            case "$current_pkg" in
-                android|com.android.systemui|*launcher*|*home*)
-                    restore_volume
-                    log_msg "  Volume restored to universal (baseline: $current_pkg)"
-                    ;;
-                *)
-                    if [ -n "$_prev_vol_pkg" ] && [ -f "$RR_DIR/$_prev_vol_pkg.vol" ]; then
-                        restore_volume
-                        log_msg "  Volume restored to universal (leaving $_prev_vol_pkg)"
-                    fi
-                    ;;
-            esac
-        fi
+        activate_tweaks "$current_pkg" "$local_lite" "$dnd_val"
     fi
 
     sleep 1

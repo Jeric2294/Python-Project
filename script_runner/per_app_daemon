@@ -1,11 +1,15 @@
 #!/system/bin/sh
 # =============================================================================
-#  PER-APP DAEMON FIX v1.0
-#  Comprehensive handler para sa:
-#  ✅ Per-app volume application
-#  ✅ Per-app refresh rate (mode) application  
-#  ✅ Per-app spare 60Hz drop activation
-#  ✅ Fallback sa universal settings
+#  PER-APP DAEMON v2.0
+#  Handles ALL per-app settings for ALL apps (including Encore games).
+#
+#  ✅ Per-app brightness   — applies on foreground, restores on leave
+#  ✅ Per-app refresh rate — per-app or universal fallback
+#  ✅ Per-app volume       — per-app or universal fallback
+#  ✅ Per-app spare 60Hz   — signals idle60_daemon
+#  ✅ Connection on launch — WiFi/Data auto-enable/disable per app
+#  ✅ Kill Others          — force-stop other apps on launch
+#  ✅ Cache Clear          — clear selected app caches on launch
 # =============================================================================
 
 MODDIR="/data/adb/modules/GovThermal"
@@ -13,14 +17,11 @@ LOG="/sdcard/GovThermal/GovThermal.log"
 CFG_DIR="/sdcard/GovThermal/config"
 RR_DIR="/sdcard/DAVION_ENGINE/refresh_locks"
 EXTERNAL_CFG="/sdcard/DAVION_ENGINE"
+DE_TOAST="$MODDIR/script_runner/de_toast"
 
-# Volume files
 UNIV_VOL="$EXTERNAL_CFG/universal_vol.txt"
-
-# Refresh rate files
 UNIV_RR="$EXTERNAL_CFG/universal_rr.txt"
-
-# Spare 60Hz file
+UNIV_BRIGHT="$EXTERNAL_CFG/universal_brightness.txt"
 IDLE60_FLAG="$CFG_DIR/idle60_enabled"
 
 # State tracking
@@ -28,281 +29,413 @@ LAST_FG_PKG=""
 LAST_APPLIED_VOL=""
 LAST_APPLIED_MODE=""
 LAST_APPLIED_SPARE=""
-LAST_BRIGHT_PKG=""       # pkg na may .bright na last na-apply; "" = walang active
+LAST_BRIGHT_PKG=""
+
+# Conn state — track which pkg enabled wifi/data so we only disable if WE turned it on
+_conn_last_fg_pkg=""
+_conn_wifi_enabled_by=""
+_conn_data_enabled_by=""
+
+# KO+Cache — only fire on real app change
+_ko_cc_last_pkg=""
 
 log_msg() { echo "[$(date '+%H:%M:%S')] [PER-APP-DAEMON] $1" >> "$LOG"; }
 
-# ── VOLUME APPLICATION ───────────────────────────────────────────────────────
-apply_volume() {
-    local VOL="$1"
-    [ -z "$VOL" ] && return 1
-    
-    # Try media_session first (more reliable)
-    cmd media_session volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
-    
-    # Fallback to media command
-    media volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
-    
-    return 1
+de_notify() {
+    local msg="$1" title="${2:-DAVION ENGINE}" type="${3:-info}"
+    [ -x "$DE_TOAST" ] && "$DE_TOAST" "$msg" "$title" "$type" 2>/dev/null &
 }
 
-# ── REFRESH RATE APPLICATION ────────────────────────────────────────────────
-apply_refresh_rate() {
-    local MODE_ID="$1"
-    [ -z "$MODE_ID" ] || [ "$MODE_ID" = "0" ] && return 1
-    
-    service call SurfaceFlinger 1035 i32 "$MODE_ID" >/dev/null 2>&1
-    return $?
+# ── GLOBAL TOGGLES ──────────────────────────────────────────
+ko_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/ko_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]
 }
 
-# ── GET CURRENT FOREGROUND PACKAGE ──────────────────────────────────────────
+cache_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/cache_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]
+}
+
+# ── APP LABEL ────────────────────────────────────────────────
+get_app_label() {
+    local pkg="$1" label
+    label=$(pm dump "$pkg" 2>/dev/null \
+        | grep -m1 "nonLocalizedLabel" \
+        | sed 's/.*nonLocalizedLabel=//' \
+        | tr -d '"' | tr -d '\r')
+    [ -n "$label" ] && echo "$label" && return
+    echo "$pkg"
+}
+
+# ── FOREGROUND PACKAGE ───────────────────────────────────────
 get_foreground_pkg() {
     local pkg=""
-    
-    # Try from /dev file first (fastest)
+    # Fast path: shared file written by encore_app_daemon
     if [ -f "/dev/.davion_last_fg_pkg" ]; then
         pkg=$(cat "/dev/.davion_last_fg_pkg" 2>/dev/null | tr -d '[:space:]')
         [ -n "$pkg" ] && echo "$pkg" && return 0
     fi
-    
-    # Fallback to dumpsys
-    pkg=$(dumpsys activity top 2>/dev/null | \
-        grep -m1 "ACTIVITY" | \
-        grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" | \
-        head -1)
+    # Fallback
+    pkg=$(dumpsys activity top 2>/dev/null \
+        | grep -m1 "ACTIVITY" \
+        | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" \
+        | head -1)
     [ -n "$pkg" ] && echo "$pkg" && return 0
-    
     return 1
 }
 
-# ── GET PER-APP VOLUME ──────────────────────────────────────────────────────
-get_app_volume() {
+# ── VOLUME ───────────────────────────────────────────────────
+apply_volume() {
+    local VOL="$1"
+    [ -z "$VOL" ] && return 1
+    cmd media_session volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
+    media volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
+    return 1
+}
+
+handle_volume() {
     local pkg="$1"
-    [ -z "$pkg" ] && return 1
-    
-    local vol_file="$RR_DIR/${pkg}.vol"
-    [ -f "$vol_file" ] || return 1
-    
-    local vol=$(tr -d '[:space:]' < "$vol_file" 2>/dev/null)
-    if [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null; then
-        echo "$vol"
-        return 0
+    local vol="" vol_source=""
+    if [ -f "$RR_DIR/${pkg}.vol" ]; then
+        vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
+        [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null \
+            && vol_source="per-app" || vol=""
     fi
-    return 1
-}
-
-# ── GET UNIVERSAL VOLUME ────────────────────────────────────────────────────
-get_universal_volume() {
-    [ -f "$UNIV_VOL" ] || return 1
-    
-    local vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
-    if [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null; then
-        echo "$vol"
-        return 0
-    fi
-    return 1
-}
-
-# ── GET PER-APP REFRESH RATE ────────────────────────────────────────────────
-get_app_refresh_rate() {
-    local pkg="$1"
-    [ -z "$pkg" ] && return 1
-    
-    local mode_file="$RR_DIR/${pkg}.mode"
-    [ -f "$mode_file" ] || return 1
-    
-    local mode=$(tr -d '[:space:]' < "$mode_file" 2>/dev/null)
-    if [ -n "$mode" ] && [ "$mode" != "0" ]; then
-        echo "$mode"
-        return 0
-    fi
-    return 1
-}
-
-# ── GET UNIVERSAL REFRESH RATE ──────────────────────────────────────────────
-get_universal_refresh_rate() {
-    [ -f "$UNIV_RR" ] || return 1
-    
-    local mode=$(tr -d '[:space:]' < "$UNIV_RR" 2>/dev/null)
-    if [ -n "$mode" ] && [ "$mode" != "0" ]; then
-        echo "$mode"
-        return 0
-    fi
-    return 1
-}
-
-# ── CHECK IF APP HAS SPARE 60HZ ENABLED ─────────────────────────────────────
-has_spare_60hz() {
-    local pkg="$1"
-    [ -z "$pkg" ] && return 1
-    
-    local spare_file="$RR_DIR/${pkg}.spare"
-    [ -f "$spare_file" ] && return 0
-    return 1
-}
-
-# ── APPLY PER-APP SETTINGS ──────────────────────────────────────────────────
-apply_per_app_settings() {
-    local pkg="$1"
-    [ -z "$pkg" ] && return 1
-    
-    # ─────── VOLUME ─────────────────────────────────────────────────────────
-    local vol=""
-    local vol_source=""
-    
-    # PRIORITY: Per-app volume ALWAYS takes precedence
-    if vol=$(get_app_volume "$pkg"); then
-        vol_source="per-app"
-    elif vol=$(get_universal_volume); then
-        vol_source="universal"
-    fi
-    
-    # Only apply if volume actually changed
+    [ -z "$vol" ] && [ -f "$UNIV_VOL" ] && {
+        vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
+        [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null \
+            && vol_source="universal" || vol=""
+    }
     if [ -n "$vol" ] && [ "$vol" != "$LAST_APPLIED_VOL" ]; then
         if apply_volume "$vol"; then
-            log_msg "📢 Volume applied: $vol ($vol_source) ← $pkg"
+            log_msg "📢 Volume: $vol ($vol_source) ← $pkg"
             LAST_APPLIED_VOL="$vol"
-            # Mark that we applied per-app volume (for WebUI to check)
-            if [ "$vol_source" = "per-app" ]; then
-                touch "$RR_DIR/.vol_per_app_active" 2>/dev/null
-            fi
+            [ "$vol_source" = "per-app" ] && touch "$RR_DIR/.vol_per_app_active" 2>/dev/null
         fi
     elif [ -z "$vol" ] && [ -n "$LAST_APPLIED_VOL" ]; then
-        # No volume config for this app, clear the state
         LAST_APPLIED_VOL=""
         rm -f "$RR_DIR/.vol_per_app_active" 2>/dev/null
     fi
+}
 
-    # ─────── PER-APP BRIGHTNESS ──────────────────────────────────────────────
-    local _bright_file="$RR_DIR/${pkg}.bright"
-    if [ -f "$_bright_file" ]; then
-        local _bv
-        _bv=$(tr -d '[:space:]' < "$_bright_file" 2>/dev/null)
-        if [ -n "$_bv" ] && [ "$_bv" -ge 0 ] 2>/dev/null; then
+# ── BRIGHTNESS ───────────────────────────────────────────────
+handle_brightness() {
+    local pkg="$1"
+    local bright_file="$RR_DIR/${pkg}.bright"
+    if [ -f "$bright_file" ]; then
+        local bv
+        bv=$(tr -d '[:space:]' < "$bright_file" 2>/dev/null)
+        if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
             settings put system screen_brightness_mode 0 2>/dev/null
-            settings put system screen_brightness "$_bv" 2>/dev/null
-            log_msg "☀ Brightness applied: $_bv (per-app) ← $pkg"
+            settings put system screen_brightness "$bv" 2>/dev/null
+            echo "$pkg" > /dev/.davion_bright_active_pkg 2>/dev/null
+            log_msg "☀ Brightness: $bv (per-app) ← $pkg"
             LAST_BRIGHT_PKG="$pkg"
         fi
-    elif [ -n "$LAST_BRIGHT_PKG" ]; then
-        # Lumipat sa app na walang .bright — i-restore sa universal o auto
-        local _univ_bright="/sdcard/DAVION_ENGINE/universal_brightness.txt"
-        if [ -f "$_univ_bright" ]; then
-            local _ub
-            _ub=$(tr -d '[:space:]' < "$_univ_bright" 2>/dev/null)
-            if [ -n "$_ub" ] && [ "$_ub" -ge 0 ] 2>/dev/null; then
-                settings put system screen_brightness_mode 0 2>/dev/null
-                settings put system screen_brightness "$_ub" 2>/dev/null
-                log_msg "☀ Brightness restored: $_ub (universal) ← $pkg"
+    else
+        # Restore if we (or encore) previously set a brightness
+        local _prev_bright_pkg
+        _prev_bright_pkg=$(cat /dev/.davion_bright_active_pkg 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$LAST_BRIGHT_PKG" ] || [ -n "$_prev_bright_pkg" ]; then
+            if [ -f "$UNIV_BRIGHT" ]; then
+                local ub
+                ub=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
+                if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null; then
+                    settings put system screen_brightness_mode 0 2>/dev/null
+                    settings put system screen_brightness "$ub" 2>/dev/null
+                    log_msg "☀ Brightness restored: $ub (universal) ← $pkg"
+                else
+                    settings put system screen_brightness_mode 1 2>/dev/null
+                    log_msg "☀ Brightness restored: auto ← $pkg"
+                fi
             else
                 settings put system screen_brightness_mode 1 2>/dev/null
                 log_msg "☀ Brightness restored: auto ← $pkg"
             fi
-        else
-            settings put system screen_brightness_mode 1 2>/dev/null
-            log_msg "☀ Brightness restored: auto ← $pkg"
-        fi
-        LAST_BRIGHT_PKG=""
-    fi
-
-    # ─────── REFRESH RATE ───────────────────────────────────────────────────
-    local mode=""
-    if mode=$(get_app_refresh_rate "$pkg"); then
-        # Per-app refresh rate found
-        if [ "$mode" != "$LAST_APPLIED_MODE" ]; then
-            if apply_refresh_rate "$mode"; then
-                log_msg "🎮 Refresh rate applied: mode $mode (per-app) ← $pkg"
-                LAST_APPLIED_MODE="$mode"
-            fi
-        fi
-    else
-        # No per-app mode, try universal
-        if mode=$(get_universal_refresh_rate); then
-            if [ "$mode" != "$LAST_APPLIED_MODE" ]; then
-                if apply_refresh_rate "$mode"; then
-                    log_msg "🎮 Refresh rate applied: mode $mode (universal) ← $pkg"
-                    LAST_APPLIED_MODE="$mode"
-                fi
-            fi
-        fi
-    fi
-    
-    # ─────── SPARE 60HZ DROP ────────────────────────────────────────────────
-    # Check kung may spare 60Hz config para sa app na ito
-    if has_spare_60hz "$pkg"; then
-        # App has spare 60Hz enabled, activate idle60 para sa kanya
-        if [ "$LAST_APPLIED_SPARE" != "$pkg" ]; then
-            # Mark this app as having spare activated
-            echo "$pkg" > "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
-            log_msg "⚡ Spare 60Hz DROP activated for: $pkg"
-            LAST_APPLIED_SPARE="$pkg"
-            
-            # Optional: Enable idle60 daemon if not running
-            if [ -f "$IDLE60_FLAG" ] && [ "$(cat "$IDLE60_FLAG" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
-                # Idle60 is enabled, it will handle this
-                :
-            fi
-        fi
-    else
-        # App doesn't have spare, clear if this was the active one
-        if [ "$LAST_APPLIED_SPARE" = "$pkg" ]; then
-            rm -f "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
-            log_msg "⚡ Spare 60Hz DROP deactivated (app $pkg has no .spare file)"
-            LAST_APPLIED_SPARE=""
-        fi
-    fi
-    
-    # ─────── SAFETY CHECK: Re-apply volume if it changed externally ───────────
-    # This prevents any other process from overriding per-app or universal volume
-    local target_vol=""
-    if [ -f "$RR_DIR/${pkg}.vol" ]; then
-        target_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
-    elif [ -f "$UNIV_VOL" ]; then
-        target_vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
-    fi
-
-    if [ -n "$target_vol" ] && [ "$target_vol" -ge 0 ] 2>/dev/null && [ "$target_vol" -le 100 ] 2>/dev/null; then
-        # Get current system volume
-        local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
-        # If they don't match, re-apply the target volume
-        if [ "$current_vol" != "$target_vol" ]; then
-            if apply_volume "$target_vol"; then
-                log_msg "🔧 Safety reapply: volume $target_vol for $pkg (was $current_vol)"
-                LAST_APPLIED_VOL="$target_vol"
-            fi
+            LAST_BRIGHT_PKG=""
+            rm -f /dev/.davion_bright_active_pkg 2>/dev/null
         fi
     fi
 }
 
-# ── MAIN LOOP ───────────────────────────────────────────────────────────────
-log_msg "Starting Per-App Daemon..."
+# ── REFRESH RATE ─────────────────────────────────────────────
+handle_refresh_rate() {
+    local pkg="$1"
+    local mode=""
+    if [ -f "$RR_DIR/${pkg}.mode" ]; then
+        mode=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.mode" 2>/dev/null)
+        [ "$mode" = "0" ] && mode=""
+    fi
+    [ -z "$mode" ] && [ -f "$UNIV_RR" ] && {
+        mode=$(tr -d '[:space:]' < "$UNIV_RR" 2>/dev/null)
+        [ "$mode" = "0" ] && mode=""
+    }
+    if [ -n "$mode" ] && [ "$mode" != "$LAST_APPLIED_MODE" ]; then
+        # Skip if idle60 intentionally dropped this pkg
+        local dropped_pkg
+        dropped_pkg=$(cat /dev/.davion_idle60_dropped_pkg 2>/dev/null | tr -d '[:space:]')
+        if [ -f "/dev/.davion_idle60_dropped" ] && [ "$dropped_pkg" = "$pkg" ]; then
+            return
+        fi
+        service call SurfaceFlinger 1035 i32 "$mode" >/dev/null 2>&1
+        log_msg "🖥 RR: mode $mode ← $pkg"
+        LAST_APPLIED_MODE="$mode"
+    fi
+}
 
-# Set process priority
+# ── SPARE 60HZ ───────────────────────────────────────────────
+handle_spare_60hz() {
+    local pkg="$1"
+    if [ -f "$RR_DIR/${pkg}.spare" ]; then
+        if [ "$LAST_APPLIED_SPARE" != "$pkg" ]; then
+            echo "$pkg" > "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
+            log_msg "⚡ Spare 60Hz: activated ← $pkg"
+            LAST_APPLIED_SPARE="$pkg"
+        fi
+    else
+        if [ "$LAST_APPLIED_SPARE" = "$pkg" ]; then
+            rm -f "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
+            log_msg "⚡ Spare 60Hz: deactivated ← $pkg"
+            LAST_APPLIED_SPARE=""
+        fi
+    fi
+}
+
+# ── CONNECTION ON LAUNCH ─────────────────────────────────────
+is_wifi_on() {
+    local w
+    w=$(settings get global wifi_on 2>/dev/null | tr -d '[:space:]')
+    [ "$w" = "1" ]
+}
+
+is_data_on() {
+    local d
+    d=$(settings get global mobile_data 2>/dev/null | tr -d '[:space:]')
+    [ "$d" = "1" ]
+}
+
+apply_conn() {
+    local pkg="$1"
+    local conn_file="$RR_DIR/$pkg.conn"
+    [ -f "$conn_file" ] || return
+    local ctype
+    ctype=$(tr -d '[:space:]' < "$conn_file")
+    case "$ctype" in
+        wifi|both)
+            if ! is_wifi_on; then
+                svc wifi enable 2>/dev/null
+                cmd wifi enable-wifi 2>/dev/null || true
+                _conn_wifi_enabled_by="$pkg"
+                log_msg "  Conn: WiFi enabled ← $pkg"
+                de_notify "WiFi enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
+            fi ;;
+    esac
+    case "$ctype" in
+        data|both)
+            if ! is_data_on; then
+                svc data enable 2>/dev/null
+                _conn_data_enabled_by="$pkg"
+                log_msg "  Conn: Data enabled ← $pkg"
+                de_notify "Mobile Data enabled for $(get_app_label "$pkg")" "CONN LAUNCH" "info"
+            fi ;;
+    esac
+}
+
+restore_conn() {
+    local leaving_pkg="$1"
+    if [ -n "$_conn_wifi_enabled_by" ] && [ "$_conn_wifi_enabled_by" = "$leaving_pkg" ]; then
+        svc wifi disable 2>/dev/null
+        cmd wifi disable-wifi 2>/dev/null || true
+        _conn_wifi_enabled_by=""
+        log_msg "  Conn: WiFi restored OFF (was enabled for $leaving_pkg)"
+        de_notify "WiFi auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
+    fi
+    if [ -n "$_conn_data_enabled_by" ] && [ "$_conn_data_enabled_by" = "$leaving_pkg" ]; then
+        svc data disable 2>/dev/null
+        _conn_data_enabled_by=""
+        log_msg "  Conn: Data restored OFF (was enabled for $leaving_pkg)"
+        de_notify "Data auto-off — $(get_app_label "$leaving_pkg") left" "CONN LAUNCH" "info"
+    fi
+}
+
+# ── KILL OTHERS ──────────────────────────────────────────────
+kill_others_for_pkg() {
+    local pkg="$1"
+    [ -f "$RR_DIR/$pkg.killothers" ] || return
+
+    local spare_list="$pkg"
+    if [ -f "$RR_DIR/$pkg.killothers_bl" ]; then
+        spare_list="$spare_list
+$(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
+    fi
+
+    local killed=0 skipped=0 killed_names=""
+    local running
+    running=$(dumpsys activity processes 2>/dev/null \
+        | grep "ProcessRecord" \
+        | grep -oE 'com\.[a-zA-Z0-9._]+|[a-z][a-zA-Z0-9_]*\.[a-zA-Z0-9._]+' \
+        | sort -u)
+
+    for target in $running; do
+        echo "$spare_list" | grep -qFx "$target" && continue
+        echo "$target" | grep -q '\.' || continue
+        case "$target" in
+            android|com.android.systemui|com.android.phone|\
+            com.android.settings|com.android.launcher*|\
+            com.google.android.gms|com.google.android.gsf) continue ;;
+        esac
+        local _pre_pids
+        _pre_pids=$(pidof "$target" 2>/dev/null)
+        am force-stop "$target" 2>/dev/null
+        if [ -n "$_pre_pids" ]; then
+            killed=$((killed + 1))
+            local short_name
+            short_name=$(echo "$target" | awk -F. '{print substr($NF,1,6)}')
+            killed_names="${killed_names:+$killed_names }$short_name"
+            log_msg "  KO: killed $target"
+        else
+            skipped=$((skipped + 1))
+        fi
+    done
+
+    local label
+    label=$(get_app_label "$pkg")
+    if [ "$killed" -gt 0 ]; then
+        de_notify "${killed} killed: ${killed_names}" "KILL OTHERS · ${label}" "warn"
+        log_msg "Kill Others: $killed killed, $skipped skipped ← $pkg"
+    else
+        log_msg "Kill Others: nothing to kill ← $pkg"
+    fi
+}
+
+# ── CACHE CLEAR ──────────────────────────────────────────────
+clear_cache_for_pkg() {
+    local pkg="$1"
+    [ -f "$RR_DIR/$pkg.cacheclear" ] || return
+    local SELECTED_FILE="$EXTERNAL_CFG/cache_selected.txt"
+    [ -f "$SELECTED_FILE" ] || { log_msg "Cache Clear: no selection file ← $pkg"; return; }
+
+    local cleared=0 skipped=0
+    local target total_kb did_clear seen_real real_dir kb cache_dir
+
+    while IFS= read -r target; do
+        target=$(printf '%s' "$target" | tr -d '\r')
+        { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
+        [ "$target" = "$pkg" ] && { skipped=$((skipped + 1)); continue; }
+        case "$target" in
+            android|com.android.systemui|com.android.phone|\
+            com.android.settings|com.android.launcher*|\
+            com.google.android.gms|com.google.android.gsf|\
+            com.topjohnwu.magisk|com.android.shell|\
+            com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
+        esac
+        total_kb=0; did_clear=0; seen_real=""
+        for cache_dir in \
+            "/data/user/0/$target/cache" \
+            "/data/user_de/0/$target/cache" \
+            "/data/data/$target/cache"; do
+            [ -d "$cache_dir" ] || continue
+            real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
+            case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
+            seen_real="${seen_real}|${real_dir}|"
+            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
+            [ "${kb:-0}" = "0" ] && continue
+            rm -rf "${cache_dir:?}/"* 2>/dev/null
+            total_kb=$((total_kb + ${kb:-0}))
+            did_clear=1
+        done
+        if [ "$did_clear" = "1" ]; then
+            cleared=$((cleared + 1))
+            log_msg "  CacheClr: $target (~${total_kb}KB)"
+        else
+            skipped=$((skipped + 1))
+        fi
+    done < "$SELECTED_FILE"
+
+    local label
+    label=$(get_app_label "$pkg")
+    if [ "$cleared" -gt 0 ]; then
+        de_notify "${cleared} cache(s) cleared" "${label}" "success"
+        log_msg "Cache Clear: $cleared cleared, $skipped skipped ← $pkg"
+    else
+        log_msg "Cache Clear: nothing to clear ← $pkg"
+    fi
+}
+
+# ── APPLY ALL SETTINGS ON APP CHANGE ────────────────────────
+apply_per_app_settings() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+
+    handle_volume "$pkg"
+    handle_brightness "$pkg"
+    handle_refresh_rate "$pkg"
+    handle_spare_60hz "$pkg"
+}
+
+# ── ON-CHANGE ACTIONS (conn, ko, cache — once per app switch) ─
+apply_on_change() {
+    local pkg="$1" prev_pkg="$2"
+
+    # Restore conn for the app that just left
+    [ -n "$prev_pkg" ] && restore_conn "$prev_pkg"
+
+    # Apply conn for new app
+    [ -n "$pkg" ] && apply_conn "$pkg"
+
+    # Kill Others + Cache Clear
+    if [ -n "$pkg" ]; then
+        [ -f "$RR_DIR/$pkg.killothers" ] && ko_global_enabled && \
+            kill_others_for_pkg "$pkg" &
+        [ -f "$RR_DIR/$pkg.cacheclear" ] && cache_global_enabled && \
+            clear_cache_for_pkg "$pkg" &
+    fi
+}
+
+# ── MAIN LOOP ────────────────────────────────────────────────
+log_msg "Started — handling all per-app settings"
+
 renice -n -15 -p $$ 2>/dev/null
 echo $$ > /dev/cpuset/top-app/tasks 2>/dev/null
 [ -f /proc/$$/oom_score_adj ] && echo -950 > /proc/$$/oom_score_adj 2>/dev/null
 
-RAPID_POLL_COUNT=0  # Counter for rapid polling on app change
+RAPID_POLL_COUNT=0
 
 while true; do
-    # Get current foreground package
     CURR_PKG=$(get_foreground_pkg)
-    
-    # If package changed or first run, apply settings IMMEDIATELY
+
     if [ -n "$CURR_PKG" ] && [ "$CURR_PKG" != "$LAST_FG_PKG" ]; then
+        PREV_PKG="$LAST_FG_PKG"
         LAST_FG_PKG="$CURR_PKG"
         log_msg "App changed: $CURR_PKG"
+
+        # Apply per-app display/audio settings
         apply_per_app_settings "$CURR_PKG"
-        # Reset LAST_APPLIED values to force re-apply on next poll if needed
-        RAPID_POLL_COUNT=5  # Do 5 rapid re-checks (0.3s * 5 = 1.5s total)
+
+        # One-shot actions on app change (conn, ko, cache)
+        apply_on_change "$CURR_PKG" "$PREV_PKG"
+
+        RAPID_POLL_COUNT=5
     fi
-    
-    # Rapid re-polling right after app change to catch race conditions
+
+    # Vol retrigger — WebUI signals after saving vol config
+    if [ -f /dev/.davion_vol_retrigger ]; then
+        retrig_pkg=$(cat /dev/.davion_vol_retrigger 2>/dev/null | tr -d '[:space:]')
+        rm -f /dev/.davion_vol_retrigger 2>/dev/null
+        if [ -n "$retrig_pkg" ] && [ -f "$RR_DIR/$retrig_pkg.vol" ]; then
+            LAST_APPLIED_VOL=""
+            handle_volume "$retrig_pkg"
+            log_msg "Vol retrigger: re-applied ← $retrig_pkg"
+        fi
+    fi
+
     if [ "$RAPID_POLL_COUNT" -gt 0 ]; then
         sleep 0.15
         RAPID_POLL_COUNT=$((RAPID_POLL_COUNT - 1))
     else
-        # Normal polling
         sleep 0.3
     fi
 done

@@ -33,7 +33,6 @@ script_runner/idle60_daemon
 script_runner/sf_controller
 script_runner/thermal_watchdog
 script_runner/thermal_toggle
-script_runner/battery_guard
 script_runner/headset_daemon
 script_runner/ai_thermal_predict
 script_runner/ai_adaptive_freq

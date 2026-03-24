@@ -525,85 +525,7 @@ process_log_line() {
             ;;
     esac
 
-    # ➤ SCREEN RECORDING — instant battery guard
-    case "$line" in
-        *"MediaProjection"*|*"VirtualDisplay"*|*"screen_record"*|*"screenrecord"*|*"recording_start"*)
-            if [ -f "${CFG_DIR}/battery_guard_enabled" ]; then
-                (
-                    sv()  { [ -f "$1" ] && echo "$2" > "$1" 2>/dev/null; }
-                    svx() { chmod 644 "$1" 2>/dev/null; sv "$1" "$2"; }
-                    # FPSGO off
-                    sv /sys/kernel/fpsgo/common/fpsgo_enable 0
-                    sv /sys/kernel/fpsgo/common/force_onoff 2
-                    sv /sys/kernel/fpsgo/fbt/thrm_enable 0
-                    sv /sys/kernel/fpsgo/common/stop_boost 1
-                    # MTK OC + PPM
-                    svx /proc/mtk_batoc_throttling/battery_oc_protect_stop "stop 1"
-                    svx /proc/mtk_batoc_throttling/battery_oc_protect_level "0"
-                    for i in 0 1 2 3 4 5; do
-                        [ -f "/proc/ppm/policy/$i" ] && echo "0 -1" > "/proc/ppm/policy/$i" 2>/dev/null
-                    done
-                    # Thermal + raise tzcpu to 110C
-                    for zone in /sys/class/thermal/thermal_zone*; do
-                        [ -f "$zone/mode" ] && echo "disabled" > "$zone/mode" 2>/dev/null
-                    done
-                    sv /proc/driver/thermal/tzbattery "1 90000 0 mtktsbattery-sysrst 0 0 no-cooler 0 0 no-cooler 0 0"
-                    sv /proc/driver/thermal/tzcpu "3 110000 0 mtktscpu-sysrst 90000 0 cpu_adaptive_0 82000 0 cpu_adaptive_1 0 0 no-cooler 0 0 no-cooler 0 0"
-                    cmd thermalservice override-status 0 2>/dev/null
-                    chmod 000 /sys/devices/*.mali/throttling1 /sys/devices/*.mali/throttling2 \
-                               /sys/devices/*.mali/throttling3 /sys/devices/*.mali/throttling4 2>/dev/null
-                    # ULPM off
-                    sv /sys/module/mtk_lpm/parameters/ulpm_disable 1
-                    # Battery saver off
-                    settings put global low_power 0 2>/dev/null
-                    settings put global low_power_trigger_level 0 2>/dev/null
-                    # CPU floors
-                    for POLICY in /sys/devices/system/cpu/cpufreq/policy*; do
-                        [ -d "$POLICY" ] || continue
-                        MAX=$(cat "$POLICY/cpuinfo_max_freq" 2>/dev/null || echo 0)
-                        [ "$MAX" -gt 0 ] && svx "$POLICY/scaling_min_freq" "$(( MAX / 2 ))"
-                        svx "$POLICY/scaling_max_freq" "$MAX"
-                    done
-                    # schedutil 2000µs (NOT 500 -- 500 causes CPU overhead/thrashing)
-                    for POLICY in /sys/devices/system/cpu/cpufreq/policy*; do
-                        [ -d "$POLICY" ] || continue
-                        PMAX=$(cat "$POLICY/cpuinfo_max_freq" 2>/dev/null || echo 0)
-                        for SU in "$POLICY/schedutil" "$POLICY/schedhorizon" "$POLICY/uag"; do
-                            [ -d "$SU" ] && sv "$SU/up_rate_limit_us" "2000" && sv "$SU/down_rate_limit_us" "5000"
-                            [ -d "$SU" ] && [ "$PMAX" -gt 0 ] && sv "$SU/hispeed_freq" "$(( PMAX * 80 / 100 ))"
-                        done
-                    done
-                    # GPU + bypass power limits
-                    for GPU in /sys/class/devfreq/*mali* /sys/class/devfreq/*gpu*; do
-                        [ -d "$GPU" ] || continue
-                        AVAIL=$(cat "$GPU/available_governors" 2>/dev/null)
-                        echo "$AVAIL" | grep -q "simple_ondemand" && echo "simple_ondemand" > "$GPU/governor" 2>/dev/null
-                        GPU_MAX=$(cat "$GPU/max_freq" 2>/dev/null || echo 0)
-                        [ "$GPU_MAX" -gt 0 ] && echo "$GPU_MAX" > "$GPU/max_freq" 2>/dev/null
-                    done
-                    for f in /proc/gpufreqv2/gpufreq_power_limited /proc/gpufreq/gpufreq_power_limited; do
-                        [ -f "$f" ] && {
-                            echo "ignore_thermal_protect 1" > "$f" 2>/dev/null
-                            echo "ignore_pbm_limited 1"     > "$f" 2>/dev/null
-                            echo "ignore_batt_percent 1"    > "$f" 2>/dev/null
-                        }
-                    done
-                    sv /sys/module/ged/parameters/gpu_bottom_freq 500000
-                    # DRAM
-                    sv /sys/devices/platform/boot_dramboost/dramboost/dramboost "1"
-                    # Media RT priority
-                    for proc in mediaserver media.codec android.media; do
-                        for pid in $(pgrep -f "$proc" 2>/dev/null); do
-                            renice -n -10 -p "$pid" 2>/dev/null
-                            chrt -r -p 15 "$pid" 2>/dev/null
-                        done
-                    done
-                    echo "1" > /dev/.davion_batt_guard_state 2>/dev/null
-                    log_msg "🛡️ Instant Battery Guard: screen recording detected"
-                ) &
-            fi
-            ;;
-    esac
+
 
     # ➤ APP ACTIVITY RESUME — GAME OR NORMAL MODE
     case "$line" in        *"input_focus"*|*"wm_on_resume_called"*|*"top_resumed_app_focus"*|*"am_on_resume_called"*|*"monitor_focus_event"*|*"am_resume_activity"*)
@@ -647,8 +569,8 @@ process_log_line() {
                 fi
                 echo "1" > "$CAMERA_STATE_FILE"
 
-                # ── Instant Battery Guard for camera/video call ──
-                if [ -f "$CONN_IDLE_WIFI_OFF_FILE" ] || [ -f "${CFG_DIR}/battery_guard_enabled" ]; then
+                # ── Camera tweaks when conn_idle is active ──
+                if [ -f "$CONN_IDLE_WIFI_OFF_FILE" ]; then
                     (
                         sv()  { [ -f "$1" ] && echo "$2" > "$1" 2>/dev/null; }
                         svx() { chmod 644 "$1" 2>/dev/null; sv "$1" "$2"; }
@@ -722,8 +644,7 @@ process_log_line() {
                                 chrt -r -p 15 "$pid" 2>/dev/null
                             done
                         done
-                        echo "1" > /dev/.davion_batt_guard_state 2>/dev/null
-                        log_msg "🛡️ Instant Battery Guard: camera/video call active"
+                        log_msg "📸 Camera tweaks applied: conn_idle active"
                     ) &
                 fi
                 
@@ -1101,57 +1022,6 @@ process_log_line() {
                     apply_killothers "$PKG"
                 fi
 
-                # --- 5f. GAMING BATTERY GUARD ---
-                BG_FILE="$REFRESH_LOCK_DIR/${PKG}.batt_guard"
-                if [ -f "$BG_FILE" ] && [ -f "$MOD_DIR/script_runner/battery_guard" ]; then
-                    # Force-apply guard tweaks immediately (no threshold check)
-                    log_msg "🛡️ Gaming Battery Guard: activating for $PKG"
-                    (
-                        sv()  { [ -f "$1" ] && echo "$2" > "$1" 2>/dev/null; }
-                        svx() { chmod 644 "$1" 2>/dev/null; sv "$1" "$2"; }
-                        # PPM
-                        for i in 0 1 2 3 4 5; do
-                            [ -f "/proc/ppm/policy/$i" ] && echo "0 -1" > "/proc/ppm/policy/$i" 2>/dev/null
-                        done
-                        # MTK OC throttle
-                        svx /proc/mtk_batoc_throttling/battery_oc_protect_stop "stop 1"
-                        svx /proc/mtk_batoc_throttling/battery_oc_protect_level "0"
-                        # Battery saver off
-                        settings put global low_power 0 2>/dev/null
-                        settings put global low_power_trigger_level 0 2>/dev/null
-                        # CPU min_freq floor 50%
-                        for POLICY in /sys/devices/system/cpu/cpufreq/policy*; do
-                            [ -d "$POLICY" ] || continue
-                            MAX=$(cat "$POLICY/cpuinfo_max_freq" 2>/dev/null || echo 0)
-                            [ "$MAX" -le 0 ] && continue
-                            FLOOR=$(( MAX / 2 ))
-                            svx "$POLICY/scaling_min_freq" "$FLOOR"
-                            svx "$POLICY/scaling_max_freq" "$MAX"
-                        done
-                        # schedutil fast ramp
-                        for POLICY in /sys/devices/system/cpu/cpufreq/policy*; do
-                            [ -d "$POLICY" ] || continue
-                            for SU in "$POLICY/schedutil" "$POLICY/schedhorizon" "$POLICY/uag"; do
-                                [ -d "$SU" ] && sv "$SU/up_rate_limit_us" "2000" && sv "$SU/down_rate_limit_us" "5000"
-                            done
-                        done
-                        # schedtune boost
-                        sv /dev/stune/top-app/schedtune.boost "30"
-                        sv /dev/stune/top-app/schedtune.sched_boost_enabled "1"
-                        # GPU simple_ondemand
-                        for GPU in /sys/class/devfreq/*mali* /sys/class/devfreq/*gpu*; do
-                            [ -d "$GPU" ] && AVAIL=$(cat "$GPU/available_governors" 2>/dev/null)
-                            if echo "$AVAIL" | grep -q "simple_ondemand"; then
-                                echo "simple_ondemand" > "$GPU/governor" 2>/dev/null
-                            fi
-                        done
-                        # DRAM boost
-                        sv /sys/devices/platform/boot_dramboost/dramboost/dramboost "1"
-                        echo "1" > /dev/.davion_batt_guard_state 2>/dev/null
-                    ) &
-                    echo "1" > /dev/.davion_batt_guard_app_active 2>/dev/null
-                fi
-
                 # --- 6. EEM VOLTAGE OFFSET ---
                 EEM_FILE="$PER_APP_DIR/${PKG}.eem_offset"
                 if [ -f "$EEM_FILE" ]; then
@@ -1276,20 +1146,6 @@ process_log_line() {
                             log_msg "🎨 Saturation reset to 1.0 (no global, leaving ${_last_sat_pkg})"
                         fi
                         _last_sat_pkg=""
-                    fi
-                    # Release Gaming Battery Guard if was active for a game
-                    if [ -f /dev/.davion_batt_guard_app_active ]; then
-                        rm -f /dev/.davion_batt_guard_app_active
-                        echo "0" > /dev/.davion_batt_guard_state 2>/dev/null
-                        # Restore CPU min_freq to hardware min
-                        for POLICY in /sys/devices/system/cpu/cpufreq/policy*; do
-                            [ -d "$POLICY" ] || continue
-                            HW_MIN=$(cat "$POLICY/cpuinfo_min_freq" 2>/dev/null || echo 0)
-                            [ "$HW_MIN" -gt 0 ] && chmod 644 "$POLICY/scaling_min_freq" 2>/dev/null && \
-                                echo "$HW_MIN" > "$POLICY/scaling_min_freq" 2>/dev/null
-                        done
-                        settings put global low_power_trigger_level 15 2>/dev/null
-                        log_msg "🛡️ Gaming Battery Guard released"
                     fi
                     enable_zram
                     apply_non_gaming_logic
