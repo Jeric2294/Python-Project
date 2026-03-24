@@ -17,6 +17,9 @@ EXTERNAL_CFG="/sdcard/DAVION_ENGINE"
 # Volume files
 UNIV_VOL="$EXTERNAL_CFG/universal_vol.txt"
 
+# Brightness files
+UNIV_BRIGHT="$EXTERNAL_CFG/universal_brightness.txt"
+
 # Refresh rate files
 UNIV_RR="$EXTERNAL_CFG/universal_rr.txt"
 
@@ -26,6 +29,7 @@ IDLE60_FLAG="$CFG_DIR/idle60_enabled"
 # State tracking
 LAST_FG_PKG=""
 LAST_APPLIED_VOL=""
+LAST_APPLIED_BRIGHT=""
 LAST_APPLIED_MODE=""
 LAST_APPLIED_SPARE=""
 
@@ -43,6 +47,30 @@ apply_volume() {
     media volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
     
     return 1
+}
+
+# ── BRIGHTNESS APPLICATION ───────────────────────────────────────────────────
+apply_brightness() {
+    local BV="$1"
+    [ -z "$BV" ] && return 1
+    settings put system screen_brightness_mode 0 2>/dev/null
+    settings put system screen_brightness "$BV" 2>/dev/null
+    return $?
+}
+
+restore_brightness_to_auto_or_universal() {
+    if [ -f "$UNIV_BRIGHT" ]; then
+        local ub
+        ub=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
+        if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null; then
+            settings put system screen_brightness_mode 0 2>/dev/null
+            settings put system screen_brightness "$ub" 2>/dev/null
+            return 0
+        fi
+    fi
+    # No universal brightness — restore auto
+    settings put system screen_brightness_mode 1 2>/dev/null
+    return 0
 }
 
 # ── REFRESH RATE APPLICATION ────────────────────────────────────────────────
@@ -97,6 +125,34 @@ get_universal_volume() {
     local vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
     if [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null; then
         echo "$vol"
+        return 0
+    fi
+    return 1
+}
+
+# ── GET PER-APP BRIGHTNESS ──────────────────────────────────────────────────
+get_app_brightness() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+    
+    local bright_file="$RR_DIR/${pkg}.bright"
+    [ -f "$bright_file" ] || return 1
+    
+    local bv=$(tr -d '[:space:]' < "$bright_file" 2>/dev/null)
+    if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
+        echo "$bv"
+        return 0
+    fi
+    return 1
+}
+
+# ── GET UNIVERSAL BRIGHTNESS ─────────────────────────────────────────────────
+get_universal_brightness() {
+    [ -f "$UNIV_BRIGHT" ] || return 1
+    
+    local bv=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
+    if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
+        echo "$bv"
         return 0
     fi
     return 1
@@ -171,6 +227,29 @@ apply_per_app_settings() {
         LAST_APPLIED_VOL=""
         rm -f "$RR_DIR/.vol_per_app_active" 2>/dev/null
     fi
+
+    # ─────── BRIGHTNESS ──────────────────────────────────────────────────────
+    local bright=""
+    local bright_source=""
+
+    # PRIORITY: Per-app brightness takes precedence, then universal, then auto
+    if bright=$(get_app_brightness "$pkg"); then
+        bright_source="per-app"
+    elif bright=$(get_universal_brightness); then
+        bright_source="universal"
+    fi
+
+    if [ -n "$bright" ] && [ "$bright" != "$LAST_APPLIED_BRIGHT" ]; then
+        if apply_brightness "$bright"; then
+            log_msg "☀ Brightness applied: $bright ($bright_source) ← $pkg"
+            LAST_APPLIED_BRIGHT="$bright"
+        fi
+    elif [ -z "$bright" ] && [ -n "$LAST_APPLIED_BRIGHT" ]; then
+        # No brightness config for this app — restore universal or auto
+        restore_brightness_to_auto_or_universal
+        log_msg "☀ Brightness restored: auto/universal (no config for $pkg)"
+        LAST_APPLIED_BRIGHT=""
+    fi
     
     # ─────── REFRESH RATE ───────────────────────────────────────────────────
     local mode=""
@@ -219,23 +298,18 @@ apply_per_app_settings() {
         fi
     fi
     
-    # ─────── SAFETY CHECK: Re-apply volume if it changed externally ───────────
-    # This prevents any other process from overriding per-app or universal volume
-    local target_vol=""
+    # ─────── SAFETY CHECK: Re-apply per-app volume if it exists ───────────────
+    # This prevents any other process from overriding per-app volume
     if [ -f "$RR_DIR/${pkg}.vol" ]; then
-        target_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
-    elif [ -f "$UNIV_VOL" ]; then
-        target_vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
-    fi
-
-    if [ -n "$target_vol" ] && [ "$target_vol" -ge 0 ] 2>/dev/null && [ "$target_vol" -le 100 ] 2>/dev/null; then
-        # Get current system volume
-        local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
-        # If they don't match, re-apply the target volume
-        if [ "$current_vol" != "$target_vol" ]; then
-            if apply_volume "$target_vol"; then
-                log_msg "🔧 Safety reapply: volume $target_vol for $pkg (was $current_vol)"
-                LAST_APPLIED_VOL="$target_vol"
+        local safety_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
+        if [ -n "$safety_vol" ] && [ "$safety_vol" -ge 0 ] 2>/dev/null && [ "$safety_vol" -le 100 ] 2>/dev/null; then
+            # Get current system volume
+            local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
+            # If they don't match, re-apply the per-app volume
+            if [ "$current_vol" != "$safety_vol" ]; then
+                if apply_volume "$safety_vol"; then
+                    log_msg "🔧 Safety reapply: per-app volume $safety_vol for $pkg (was $current_vol)"
+                fi
             fi
         fi
     fi
@@ -271,5 +345,22 @@ while true; do
     else
         # Normal polling
         sleep 0.3
+    fi
+
+    # ── Brightness retrigger (signal from WebUI after saving per-app brightness) ──
+    if [ -f "/dev/.davion_bright_retrigger" ]; then
+        _trigger_pkg=$(tr -d '[:space:]' < "/dev/.davion_bright_retrigger" 2>/dev/null)
+        rm -f "/dev/.davion_bright_retrigger" 2>/dev/null
+        # Only act if the retrigger is for the current foreground app
+        if [ -n "$_trigger_pkg" ] && [ "$_trigger_pkg" = "$LAST_FG_PKG" ]; then
+            _new_bright=$(get_app_brightness "$_trigger_pkg")
+            if [ -n "$_new_bright" ]; then
+                if apply_brightness "$_new_bright"; then
+                    log_msg "☀ Brightness retrigger: $_new_bright for $_trigger_pkg"
+                    LAST_APPLIED_BRIGHT="$_new_bright"
+                fi
+            fi
+        fi
+        unset _trigger_pkg _new_bright
     fi
 done

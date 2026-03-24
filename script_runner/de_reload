@@ -20,7 +20,6 @@ notify "Applying changes..." "info"
 # ── 1. Kill all background daemons ───────────────────────────
 log_msg "Stopping daemons..."
 pkill -f "encore_app_daemon" 2>/dev/null
-pkill -f "per_app_daemon" 2>/dev/null
 pkill -f "GovThermal.*logcat" 2>/dev/null
 pkill -f "GovThermal.*dumpsys2" 2>/dev/null
 pkill -f "rr_guard" 2>/dev/null
@@ -72,7 +71,6 @@ SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
 # ── 5. Restart all daemons ───────────────────────────────────
 log_msg "Restarting daemons..."
 nohup sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
-nohup sh "$MODDIR/script_runner/per_app_daemon" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
 nohup sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &

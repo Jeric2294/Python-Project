@@ -348,7 +348,7 @@ restore_brightness() {
     if [ -f "$UNIVERSAL_BRIGHT_FILE" ]; then
         local ub
         ub=$(tr -d '[:space:]' < "$UNIVERSAL_BRIGHT_FILE")
-        if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null && [ "$ub" -le 255 ] 2>/dev/null; then
+        if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null; then
             settings put system screen_brightness_mode 0 2>/dev/null
             settings put system screen_brightness "$ub" 2>/dev/null
             return
