@@ -1241,6 +1241,7 @@ async function clearUniversalRR() {
    § 9b  Universal Brightness Lock
    ═══════════════════════════════════════════════════════════ */
 let universalBrightness = null; // null = not locked, 0-255 = locked value
+let _univBrightSliderUpdating = false; // Flag: true when loadUniversalBrightness() is updating the slider UI
 
 function updateUnivBrightSlider(val) {
   const slider = document.getElementById('universal-bright-slider');
@@ -1305,6 +1306,10 @@ async function loadUniversalBrightness() {
   }
   const slider = document.getElementById('universal-bright-slider');
   if (slider) {
+    // SET FLAG: We're about to programmatically update the slider
+    // This prevents the input event listener from triggering apply-brightness
+    _univBrightSliderUpdating = true;
+    
     slider.max = DEVICE_MAX_BRIGHTNESS;
     if (universalBrightness !== null) {
       slider.value = Math.min(universalBrightness, DEVICE_MAX_BRIGHTNESS);
@@ -1322,6 +1327,9 @@ async function loadUniversalBrightness() {
         updateUnivBrightSlider(Math.round(DEVICE_MAX_BRIGHTNESS / 2));
       }
     }
+    
+    // CLEAR FLAG: Slider update is complete, input listener is now active again
+    _univBrightSliderUpdating = false;
   }
   renderUnivBrightState();
 }
@@ -1329,26 +1337,43 @@ async function loadUniversalBrightness() {
 function initUniversalBrightness() {
   const slider = document.getElementById('universal-bright-slider');
   let _univBrightDebounce = null;
+  let _univBrightProgrammatic = false; // Flag: true when WE'RE changing slider, false when daemon changes it
 
-  function _setBrightSlider(v) {
+  function _setBrightSlider(v, isUserTriggered = true) {
     if (!slider) return;
     v = Math.max(0, Math.min(DEVICE_MAX_BRIGHTNESS || 255, v));
+    
+    // When programmatically updating slider, DON'T auto-apply brightness
+    _univBrightProgrammatic = !isUserTriggered;
     slider.value = v;
+    _univBrightProgrammatic = false;
+    
     updateUnivBrightSlider(v);
     const activeEl = document.getElementById('universal-bright-active');
     if (activeEl) { activeEl.textContent = v + ' / ' + (DEVICE_MAX_BRIGHTNESS || 255); activeEl.className = 'rr-status-val on'; }
-    clearTimeout(_univBrightDebounce);
-    _univBrightDebounce = setTimeout(() => {
-      exec(`settings put system screen_brightness_mode 0 2>/dev/null; settings put system screen_brightness ${v} 2>/dev/null`);
-    }, 60);
+    
+    // ONLY apply brightness if user triggered this (not programmatic)
+    if (isUserTriggered) {
+      clearTimeout(_univBrightDebounce);
+      _univBrightDebounce = setTimeout(() => {
+        exec(`settings put system screen_brightness_mode 0 2>/dev/null; settings put system screen_brightness ${v} 2>/dev/null`);
+      }, 60);
+    }
   }
 
-  // Instant live apply while dragging
-  slider?.addEventListener('input', () => _setBrightSlider(parseInt(slider.value)));
+  // Instant live apply while dragging — but ONLY if user triggered it
+  slider?.addEventListener('input', () => {
+    // CRITICAL: Skip if we're programmatically updating the slider (from loadUniversalBrightness)
+    if (_univBrightSliderUpdating) return;
+    // Also skip if _univBrightProgrammatic flag is set (from _setBrightSlider non-user call)
+    if (_univBrightProgrammatic) return;
+    // Only apply brightness if the user directly manipulated the slider
+    _setBrightSlider(parseInt(slider.value), true);
+  });
 
   // − / + buttons (step = 5)
-  document.getElementById('bright-dec-btn')?.addEventListener('click', () => _setBrightSlider(parseInt(slider?.value || 128) - 5));
-  document.getElementById('bright-inc-btn')?.addEventListener('click', () => _setBrightSlider(parseInt(slider?.value || 128) + 5));
+  document.getElementById('bright-dec-btn')?.addEventListener('click', () => _setBrightSlider(parseInt(slider?.value || 128) - 5, true));
+  document.getElementById('bright-inc-btn')?.addEventListener('click', () => _setBrightSlider(parseInt(slider?.value || 128) + 5, true));
 
   document.getElementById('btn-bright-lock')?.addEventListener('click', async () => {
     const v = parseInt(document.getElementById('universal-bright-slider')?.value ?? 128);
@@ -2254,6 +2279,7 @@ function _noop_initAppSearch() {
    § 9c  Universal Volume Lock
    ═══════════════════════════════════════════════════════════ */
 let universalVolume = null; // null = not locked, 0-15 = locked value
+let _univVolSliderUpdating = false; // Flag: true when loadUniversalVolume() is updating the slider UI
 
 function updateUnivVolSlider(val) {
   const slider = document.getElementById('universal-vol-slider');
@@ -2314,6 +2340,10 @@ async function loadUniversalVolume() {
   }
   const slider = document.getElementById('universal-vol-slider');
   if (slider) {
+    // SET FLAG: We're about to programmatically update the slider
+    // This prevents the input event listener from triggering apply-volume
+    _univVolSliderUpdating = true;
+    
     slider.max = DEVICE_MAX_VOLUME;
     if (universalVolume !== null) {
       slider.value = Math.min(universalVolume, DEVICE_MAX_VOLUME);
@@ -2330,6 +2360,9 @@ async function loadUniversalVolume() {
         updateUnivVolSlider(Math.round(DEVICE_MAX_VOLUME / 2));
       }
     }
+    
+    // CLEAR FLAG: Slider update is complete, input listener is now active again
+    _univVolSliderUpdating = false;
   }
   renderUnivVolState();
 }
@@ -2337,25 +2370,42 @@ async function loadUniversalVolume() {
 function initUniversalVolume() {
   const slider = document.getElementById('universal-vol-slider');
   let _univVolDebounce = null;
+  let _univVolProgrammatic = false;  // Flag: true when WE'RE changing slider, false when daemon changes it
 
-  function _setVolSlider(v) {
+  function _setVolSlider(v, isUserTriggered = true) {
     if (!slider) return;
     v = Math.max(0, Math.min(DEVICE_MAX_VOLUME || 15, v));
+    
+    // When programmatically updating slider, DON'T auto-apply volume
+    _univVolProgrammatic = !isUserTriggered;
     slider.value = v;
+    _univVolProgrammatic = false;
+    
     updateUnivVolSlider(v);
     const activeEl = document.getElementById('universal-vol-active');
     if (activeEl) { activeEl.textContent = v + ' / ' + (DEVICE_MAX_VOLUME || 15); activeEl.className = 'rr-status-val on'; }
-    clearTimeout(_univVolDebounce);
-    _univVolDebounce = setTimeout(() => {
-      exec(`cmd media_session volume --stream 3 --set ${v} 2>/dev/null; true`);
-    }, 60);
+    
+    // ONLY apply volume if user triggered this (not programmatic)
+    if (isUserTriggered) {
+      clearTimeout(_univVolDebounce);
+      _univVolDebounce = setTimeout(() => {
+        exec(`cmd media_session volume --stream 3 --set ${v} 2>/dev/null; true`);
+      }, 60);
+    }
   }
 
-  slider?.addEventListener('input', () => _setVolSlider(parseInt(slider.value)));
+  slider?.addEventListener('input', () => {
+    // CRITICAL: Skip if we're programmatically updating the slider (from loadUniversalVolume)
+    if (_univVolSliderUpdating) return;
+    // Also skip if _univVolProgrammatic flag is set (from _setVolSlider non-user call)
+    if (_univVolProgrammatic) return;
+    // Only apply volume if the user directly manipulated the slider
+    _setVolSlider(parseInt(slider.value), true);
+  });
 
   // − / + buttons (step = 1)
-  document.getElementById('vol-dec-btn')?.addEventListener('click', () => _setVolSlider(parseInt(slider?.value || 8) - 1));
-  document.getElementById('vol-inc-btn')?.addEventListener('click', () => _setVolSlider(parseInt(slider?.value || 8) + 1));
+  document.getElementById('vol-dec-btn')?.addEventListener('click', () => _setVolSlider(parseInt(slider?.value || 8) - 1, true));
+  document.getElementById('vol-inc-btn')?.addEventListener('click', () => _setVolSlider(parseInt(slider?.value || 8) + 1, true));
 
   document.getElementById('btn-vol-lock')?.addEventListener('click', async () => {
     const v = parseInt(document.getElementById('universal-vol-slider')?.value ?? 8);
