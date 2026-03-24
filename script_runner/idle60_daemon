@@ -101,8 +101,7 @@ log_msg "getevent watcher started (PID $_GE_PID)"
 # ── Cleanup on exit ───────────────────────────────────────────
 cleanup() {
     kill "$_GE_PID" 2>/dev/null
-    # Kill any child getevent processes too
-    pkill -f "getevent" 2>/dev/null
+    # getevent -c 1 child will exit naturally after 1 input event
     log_msg "Daemon exiting"
     exit 0
 }
@@ -193,8 +192,9 @@ while true; do
     fi
     _last_touch_ts="$CUR_TOUCH"
 
-    # Per-app custom delay override
+    # Per-app custom delay override — validate numeric to prevent silent fail
     EFF_DELAY=$(get_app_delay "$CUR_PKG" "$DELAY")
+    [ "$EFF_DELAY" -eq "$EFF_DELAY" ] 2>/dev/null || EFF_DELAY="$DELAY"
 
     # ── Idle threshold reached → drop to 60Hz ─────────────────
     if [ "$IDLE" -ge "$EFF_DELAY" ] && [ "$DROPPED" = "0" ]; then
