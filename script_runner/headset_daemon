@@ -197,14 +197,21 @@ on_disconnect() {
         log_msg "muted on disconnect"
     fi
 
-    # Restore to universal volume lock (unconditional — original behavior)
-    if [ -f "$UNIVERSAL_VOL_FILE" ]; then
+    # Restore to universal volume lock — BUT NOT if app has per-app config
+    # Get current foreground package
+    local current_pkg=$(dumpsys activity top 2>/dev/null | grep -m1 "ACTIVITY" | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" | head -1)
+    local per_app_vol_file="$RR_DIR/$current_pkg.vol"
+    
+    # Only restore universal volume if current app doesn't have per-app volume
+    if [ ! -f "$per_app_vol_file" ] && [ -f "$UNIVERSAL_VOL_FILE" ]; then
         local uvol
         uvol=$(cat "$UNIVERSAL_VOL_FILE" 2>/dev/null | tr -d '[:space:]')
         if [ -n "$uvol" ] && [ "$uvol" -ge 0 ] 2>/dev/null && [ "$uvol" -le 100 ] 2>/dev/null; then
             set_vol "$uvol"
-            log_msg "restored universal vol → $uvol"
+            log_msg "restored universal vol → $uvol (no per-app config for $current_pkg)"
         fi
+    else
+        log_msg "skipped universal vol restore (per-app config exists for $current_pkg)"
     fi
 }
 

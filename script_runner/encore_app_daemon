@@ -358,32 +358,22 @@ restore_brightness() {
 }
 
 # ── Apply per-app volume ──────────────────────────────────────
+# DISABLED: per_app_daemon handles volume with better logic & safety mechanisms
+# Having TWO daemons apply volume causes conflicts
 apply_per_app_volume() {
     local pkg="$1"
-    local vol_file="$RR_DIR/$pkg.vol"
-    if [ -f "$vol_file" ]; then
-        local vv
-        vv=$(tr -d '[:space:]' < "$vol_file")
-        if [ -n "$vv" ] && [ "$vv" -ge 0 ] 2>/dev/null; then
-            # Primary: AudioManager stream level (works even without active session)
-            media volume --stream 3 --set "$vv" 2>/dev/null ||             settings put system volume_music "$vv" 2>/dev/null
-            # Secondary: active media session (for apps already playing)
-            cmd media_session volume --stream 3 --set "$vv" 2>/dev/null; true
-            log_msg "  Volume locked: $vv for $pkg"
-        fi
-    fi
+    # Volume is now handled EXCLUSIVELY by per_app_daemon
+    # This function is kept for compatibility but does nothing
+    return 0
 }
 
 # ── Restore volume to universal or do nothing ─────────────────
+# DISABLED: per_app_daemon handles all volume logic (per-app + universal fallback)
+# This function is kept for compatibility but does nothing
 restore_volume() {
-    if [ -f "$UNIVERSAL_VOL_FILE" ]; then
-        local uv
-        uv=$(tr -d '[:space:]' < "$UNIVERSAL_VOL_FILE")
-        if [ -n "$uv" ] && [ "$uv" -ge 0 ] 2>/dev/null; then
-            media volume --stream 3 --set "$uv" 2>/dev/null ||             settings put system volume_music "$uv" 2>/dev/null
-            cmd media_session volume --stream 3 --set "$uv" 2>/dev/null; true
-        fi
-    fi
+    # Volume restoration is now handled EXCLUSIVELY by per_app_daemon
+    # This prevents conflicts between two daemons trying to manage volume
+    return 0
 }
 
 GLOBAL_SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
@@ -639,15 +629,17 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             log_msg "  RR(lc): mode $_mid for $pkg"
         fi
         # Volume
-        _vf="$RR_DIR/$pkg.vol"
-        if [ -f "$_vf" ]; then
-            _vv=$(tr -d '[:space:]' < "$_vf")
-            if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null; then
-                media volume --stream 3 --set "$_vv" 2>/dev/null ||                     settings put system volume_music "$_vv" 2>/dev/null
-                cmd media_session volume --stream 3 --set "$_vv" 2>/dev/null; true
-                log_msg "  Vol(lc): $_vv for $pkg"
-            fi
-        fi
+        # DISABLED: per_app_daemon handles volume with better logic
+        # Applying volume here causes conflicts - removed for stability
+        # _vf="$RR_DIR/$pkg.vol"
+        # if [ -f "$_vf" ]; then
+        #     _vv=$(tr -d '[:space:]' < "$_vf")
+        #     if [ -n "$_vv" ] && [ "$_vv" -ge 0 ] 2>/dev/null; then
+        #         media volume --stream 3 --set "$_vv" 2>/dev/null || settings put system volume_music "$_vv" 2>/dev/null
+        #         cmd media_session volume --stream 3 --set "$_vv" 2>/dev/null; true
+        #         log_msg "  Vol(lc): $_vv for $pkg"
+        #     fi
+        # fi
         # Connection on Launch
         _cf="$RR_DIR/$pkg.conn"
         if [ -f "$_cf" ]; then
