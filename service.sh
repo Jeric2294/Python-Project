@@ -654,6 +654,20 @@ fi
         log_msg "RR Guard daemon started (PID $!)"
     fi
 
+    # ┌─ Per-App Settings Daemon (Volume, Refresh Rate, Spare 60Hz) ─┐
+    # │ Comprehensive handler para sa per-app settings application   │
+    # │ Features: volume, refresh rate, spare 60Hz drop detection     │
+    # └────────────────────────────────────────────────────────────┘
+    PER_APP_DAEMON="$MODDIR/script_runner/per_app_daemon"
+    chmod 755 "$PER_APP_DAEMON" 2>/dev/null
+    pkill -f "per_app_daemon" 2>/dev/null
+    if [ -x "$PER_APP_DAEMON" ]; then
+        nohup sh "$PER_APP_DAEMON" >> "$LOG" 2>&1 &
+        log_msg "Per-App Settings Daemon started (PID $!)"
+    else
+        log_msg "⚠️  Per-App Daemon NOT FOUND: $PER_APP_DAEMON"
+    fi
+
     # ── Hot Reload Daemon ──────────────────────────────────────
     HOT_RELOAD_DAEMON="$MODDIR/script_runner/hot_reload_daemon"
     chmod 755 "$HOT_RELOAD_DAEMON" 2>/dev/null

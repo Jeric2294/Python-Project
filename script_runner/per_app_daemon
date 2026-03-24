@@ -1,0 +1,239 @@
+#!/system/bin/sh
+# =============================================================================
+#  PER-APP DAEMON FIX v1.0
+#  Comprehensive handler para sa:
+#  ✅ Per-app volume application
+#  ✅ Per-app refresh rate (mode) application  
+#  ✅ Per-app spare 60Hz drop activation
+#  ✅ Fallback sa universal settings
+# =============================================================================
+
+MODDIR="/data/adb/modules/GovThermal"
+LOG="/sdcard/GovThermal/GovThermal.log"
+CFG_DIR="/sdcard/GovThermal/config"
+RR_DIR="/sdcard/DAVION_ENGINE/refresh_locks"
+EXTERNAL_CFG="/sdcard/DAVION_ENGINE"
+
+# Volume files
+UNIV_VOL="$EXTERNAL_CFG/universal_vol.txt"
+
+# Refresh rate files
+UNIV_RR="$EXTERNAL_CFG/universal_rr.txt"
+
+# Spare 60Hz file
+IDLE60_FLAG="$CFG_DIR/idle60_enabled"
+
+# State tracking
+LAST_FG_PKG=""
+LAST_APPLIED_VOL=""
+LAST_APPLIED_MODE=""
+LAST_APPLIED_SPARE=""
+
+log_msg() { echo "[$(date '+%H:%M:%S')] [PER-APP-DAEMON] $1" >> "$LOG"; }
+
+# ── VOLUME APPLICATION ───────────────────────────────────────────────────────
+apply_volume() {
+    local VOL="$1"
+    [ -z "$VOL" ] && return 1
+    
+    # Try media_session first (more reliable)
+    cmd media_session volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
+    
+    # Fallback to media command
+    media volume --stream 3 --set "$VOL" >/dev/null 2>&1 && return 0
+    
+    return 1
+}
+
+# ── REFRESH RATE APPLICATION ────────────────────────────────────────────────
+apply_refresh_rate() {
+    local MODE_ID="$1"
+    [ -z "$MODE_ID" ] || [ "$MODE_ID" = "0" ] && return 1
+    
+    service call SurfaceFlinger 1035 i32 "$MODE_ID" >/dev/null 2>&1
+    return $?
+}
+
+# ── GET CURRENT FOREGROUND PACKAGE ──────────────────────────────────────────
+get_foreground_pkg() {
+    local pkg=""
+    
+    # Try from /dev file first (fastest)
+    if [ -f "/dev/.davion_last_fg_pkg" ]; then
+        pkg=$(cat "/dev/.davion_last_fg_pkg" 2>/dev/null | tr -d '[:space:]')
+        [ -n "$pkg" ] && echo "$pkg" && return 0
+    fi
+    
+    # Fallback to dumpsys
+    pkg=$(dumpsys activity top 2>/dev/null | \
+        grep -m1 "ACTIVITY" | \
+        grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" | \
+        head -1)
+    [ -n "$pkg" ] && echo "$pkg" && return 0
+    
+    return 1
+}
+
+# ── GET PER-APP VOLUME ──────────────────────────────────────────────────────
+get_app_volume() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+    
+    local vol_file="$RR_DIR/${pkg}.vol"
+    [ -f "$vol_file" ] || return 1
+    
+    local vol=$(tr -d '[:space:]' < "$vol_file" 2>/dev/null)
+    if [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null; then
+        echo "$vol"
+        return 0
+    fi
+    return 1
+}
+
+# ── GET UNIVERSAL VOLUME ────────────────────────────────────────────────────
+get_universal_volume() {
+    [ -f "$UNIV_VOL" ] || return 1
+    
+    local vol=$(tr -d '[:space:]' < "$UNIV_VOL" 2>/dev/null)
+    if [ -n "$vol" ] && [ "$vol" -ge 0 ] 2>/dev/null && [ "$vol" -le 100 ] 2>/dev/null; then
+        echo "$vol"
+        return 0
+    fi
+    return 1
+}
+
+# ── GET PER-APP REFRESH RATE ────────────────────────────────────────────────
+get_app_refresh_rate() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+    
+    local mode_file="$RR_DIR/${pkg}.mode"
+    [ -f "$mode_file" ] || return 1
+    
+    local mode=$(tr -d '[:space:]' < "$mode_file" 2>/dev/null)
+    if [ -n "$mode" ] && [ "$mode" != "0" ]; then
+        echo "$mode"
+        return 0
+    fi
+    return 1
+}
+
+# ── GET UNIVERSAL REFRESH RATE ──────────────────────────────────────────────
+get_universal_refresh_rate() {
+    [ -f "$UNIV_RR" ] || return 1
+    
+    local mode=$(tr -d '[:space:]' < "$UNIV_RR" 2>/dev/null)
+    if [ -n "$mode" ] && [ "$mode" != "0" ]; then
+        echo "$mode"
+        return 0
+    fi
+    return 1
+}
+
+# ── CHECK IF APP HAS SPARE 60HZ ENABLED ─────────────────────────────────────
+has_spare_60hz() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+    
+    local spare_file="$RR_DIR/${pkg}.spare"
+    [ -f "$spare_file" ] && return 0
+    return 1
+}
+
+# ── APPLY PER-APP SETTINGS ──────────────────────────────────────────────────
+apply_per_app_settings() {
+    local pkg="$1"
+    [ -z "$pkg" ] && return 1
+    
+    # ─────── VOLUME ─────────────────────────────────────────────────────────
+    local vol=""
+    if vol=$(get_app_volume "$pkg"); then
+        # Per-app volume found
+        if [ "$vol" != "$LAST_APPLIED_VOL" ]; then
+            if apply_volume "$vol"; then
+                log_msg "📢 Volume applied: $vol (per-app) ← $pkg"
+                LAST_APPLIED_VOL="$vol"
+            fi
+        fi
+    else
+        # No per-app volume, try universal
+        if vol=$(get_universal_volume); then
+            if [ "$vol" != "$LAST_APPLIED_VOL" ]; then
+                if apply_volume "$vol"; then
+                    log_msg "📢 Volume applied: $vol (universal) ← $pkg"
+                    LAST_APPLIED_VOL="$vol"
+                fi
+            fi
+        fi
+    fi
+    
+    # ─────── REFRESH RATE ───────────────────────────────────────────────────
+    local mode=""
+    if mode=$(get_app_refresh_rate "$pkg"); then
+        # Per-app refresh rate found
+        if [ "$mode" != "$LAST_APPLIED_MODE" ]; then
+            if apply_refresh_rate "$mode"; then
+                log_msg "🎮 Refresh rate applied: mode $mode (per-app) ← $pkg"
+                LAST_APPLIED_MODE="$mode"
+            fi
+        fi
+    else
+        # No per-app mode, try universal
+        if mode=$(get_universal_refresh_rate); then
+            if [ "$mode" != "$LAST_APPLIED_MODE" ]; then
+                if apply_refresh_rate "$mode"; then
+                    log_msg "🎮 Refresh rate applied: mode $mode (universal) ← $pkg"
+                    LAST_APPLIED_MODE="$mode"
+                fi
+            fi
+        fi
+    fi
+    
+    # ─────── SPARE 60HZ DROP ────────────────────────────────────────────────
+    # Check kung may spare 60Hz config para sa app na ito
+    if has_spare_60hz "$pkg"; then
+        # App has spare 60Hz enabled, activate idle60 para sa kanya
+        if [ "$LAST_APPLIED_SPARE" != "$pkg" ]; then
+            # Mark this app as having spare activated
+            echo "$pkg" > "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
+            log_msg "⚡ Spare 60Hz DROP activated for: $pkg"
+            LAST_APPLIED_SPARE="$pkg"
+            
+            # Optional: Enable idle60 daemon if not running
+            if [ -f "$IDLE60_FLAG" ] && [ "$(cat "$IDLE60_FLAG" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+                # Idle60 is enabled, it will handle this
+                :
+            fi
+        fi
+    else
+        # App doesn't have spare, clear if this was the active one
+        if [ "$LAST_APPLIED_SPARE" = "$pkg" ]; then
+            rm -f "$EXTERNAL_CFG/spare_active_pkg.txt" 2>/dev/null
+            log_msg "⚡ Spare 60Hz DROP deactivated (app $pkg has no .spare file)"
+            LAST_APPLIED_SPARE=""
+        fi
+    fi
+}
+
+# ── MAIN LOOP ───────────────────────────────────────────────────────────────
+log_msg "Starting Per-App Daemon..."
+
+# Set process priority
+renice -n -15 -p $$ 2>/dev/null
+echo $$ > /dev/cpuset/top-app/tasks 2>/dev/null
+[ -f /proc/$$/oom_score_adj ] && echo -950 > /proc/$$/oom_score_adj 2>/dev/null
+
+while true; do
+    # Get current foreground package
+    CURR_PKG=$(get_foreground_pkg)
+    
+    # If package changed or first run, apply settings
+    if [ -n "$CURR_PKG" ] && [ "$CURR_PKG" != "$LAST_FG_PKG" ]; then
+        LAST_FG_PKG="$CURR_PKG"
+        log_msg "App changed: $CURR_PKG"
+        apply_per_app_settings "$CURR_PKG"
+    fi
+    
+    # Poll every 300ms for quick response
+    sleep 0.3
+done
