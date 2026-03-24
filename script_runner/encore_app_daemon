@@ -624,9 +624,9 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
                 log_msg "  Bright(lc): $_bv for $pkg"
             fi
         fi
-        # Refresh Rate
+        # Refresh Rate — skip if idle60_daemon intentionally dropped to 60Hz
         _mf="$RR_DIR/$pkg.mode"
-        if [ -f "$_mf" ]; then
+        if [ -f "$_mf" ] && [ ! -f "/dev/.davion_idle60_dropped" ]; then
             _mid=$(tr -d '[:space:]' < "$_mf")
             [ -n "$_mid" ] && [ "$_mid" -eq "$_mid" ] 2>/dev/null && service call SurfaceFlinger 1035 i32 "$_mid" >/dev/null 2>&1
             log_msg "  RR(lc): mode $_mid for $pkg"
