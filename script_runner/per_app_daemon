@@ -30,6 +30,7 @@ LAST_APPLIED_VOL=""
 LAST_APPLIED_MODE=""
 LAST_APPLIED_SPARE=""
 LAST_BRIGHT_PKG=""
+LAST_APPLIED_BRIGHT=""   # tracks "pkg:value" to avoid redundant writes and enable retrigger
 
 # Conn state — track which pkg enabled wifi/data so we only disable if WE turned it on
 _conn_last_fg_pkg=""
@@ -122,41 +123,58 @@ handle_volume() {
 }
 
 # ── BRIGHTNESS ───────────────────────────────────────────────
+_restore_brightness() {
+    local pkg="$1"
+    if [ -f "$UNIV_BRIGHT" ]; then
+        local ub
+        ub=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
+        if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null && [ "$ub" -le 255 ] 2>/dev/null; then
+            settings put system screen_brightness_mode 0 2>/dev/null
+            settings put system screen_brightness "$ub" 2>/dev/null
+            log_msg "☀ Brightness restored: $ub (universal) ← $pkg"
+        else
+            settings put system screen_brightness_mode 1 2>/dev/null
+            log_msg "☀ Brightness restored: auto ← $pkg"
+        fi
+    else
+        settings put system screen_brightness_mode 1 2>/dev/null
+        log_msg "☀ Brightness restored: auto ← $pkg"
+    fi
+    LAST_BRIGHT_PKG=""
+    LAST_APPLIED_BRIGHT=""
+    rm -f /dev/.davion_bright_active_pkg 2>/dev/null
+}
+
 handle_brightness() {
     local pkg="$1"
     local bright_file="$RR_DIR/${pkg}.bright"
     if [ -f "$bright_file" ]; then
         local bv
         bv=$(tr -d '[:space:]' < "$bright_file" 2>/dev/null)
-        if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null; then
-            settings put system screen_brightness_mode 0 2>/dev/null
-            settings put system screen_brightness "$bv" 2>/dev/null
-            echo "$pkg" > /dev/.davion_bright_active_pkg 2>/dev/null
-            log_msg "☀ Brightness: $bv (per-app) ← $pkg"
-            LAST_BRIGHT_PKG="$pkg"
+        # Validate: must be a non-negative integer within Android range (0-255)
+        if [ -n "$bv" ] && [ "$bv" -ge 0 ] 2>/dev/null && [ "$bv" -le 255 ] 2>/dev/null; then
+            # Skip redundant write if same pkg+value already applied
+            if [ "$LAST_APPLIED_BRIGHT" != "${pkg}:${bv}" ]; then
+                settings put system screen_brightness_mode 0 2>/dev/null
+                settings put system screen_brightness "$bv" 2>/dev/null
+                echo "$pkg" > /dev/.davion_bright_active_pkg 2>/dev/null
+                log_msg "☀ Brightness: $bv (per-app) ← $pkg"
+                LAST_BRIGHT_PKG="$pkg"
+                LAST_APPLIED_BRIGHT="${pkg}:${bv}"
+            fi
+        else
+            # Invalid/corrupt value in file — treat as missing and restore
+            log_msg "☀ Brightness: invalid value '${bv}' in ${pkg}.bright — restoring"
+            local _prev_bright_pkg
+            _prev_bright_pkg=$(cat /dev/.davion_bright_active_pkg 2>/dev/null | tr -d '[:space:]')
+            [ -n "$LAST_BRIGHT_PKG" ] || [ -n "$_prev_bright_pkg" ] && _restore_brightness "$pkg"
         fi
     else
-        # Restore if we (or encore) previously set a brightness
+        # No per-app brightness file — restore if we (or encore) previously set one
         local _prev_bright_pkg
         _prev_bright_pkg=$(cat /dev/.davion_bright_active_pkg 2>/dev/null | tr -d '[:space:]')
         if [ -n "$LAST_BRIGHT_PKG" ] || [ -n "$_prev_bright_pkg" ]; then
-            if [ -f "$UNIV_BRIGHT" ]; then
-                local ub
-                ub=$(tr -d '[:space:]' < "$UNIV_BRIGHT" 2>/dev/null)
-                if [ -n "$ub" ] && [ "$ub" -ge 0 ] 2>/dev/null; then
-                    settings put system screen_brightness_mode 0 2>/dev/null
-                    settings put system screen_brightness "$ub" 2>/dev/null
-                    log_msg "☀ Brightness restored: $ub (universal) ← $pkg"
-                else
-                    settings put system screen_brightness_mode 1 2>/dev/null
-                    log_msg "☀ Brightness restored: auto ← $pkg"
-                fi
-            else
-                settings put system screen_brightness_mode 1 2>/dev/null
-                log_msg "☀ Brightness restored: auto ← $pkg"
-            fi
-            LAST_BRIGHT_PKG=""
-            rm -f /dev/.davion_bright_active_pkg 2>/dev/null
+            _restore_brightness "$pkg"
         fi
     fi
 }
@@ -429,6 +447,17 @@ while true; do
             LAST_APPLIED_VOL=""
             handle_volume "$retrig_pkg"
             log_msg "Vol retrigger: re-applied ← $retrig_pkg"
+        fi
+    fi
+
+    # Brightness retrigger — WebUI signals after saving brightness config
+    if [ -f /dev/.davion_bright_retrigger ]; then
+        retrig_pkg=$(cat /dev/.davion_bright_retrigger 2>/dev/null | tr -d '[:space:]')
+        rm -f /dev/.davion_bright_retrigger 2>/dev/null
+        if [ -n "$retrig_pkg" ] && [ "$retrig_pkg" = "$LAST_FG_PKG" ]; then
+            LAST_APPLIED_BRIGHT=""
+            handle_brightness "$retrig_pkg"
+            log_msg "Bright retrigger: re-applied ← $retrig_pkg"
         fi
     fi
 
