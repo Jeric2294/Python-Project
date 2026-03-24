@@ -1395,66 +1395,14 @@ echo "$MONITOR_PID" > "$LOGCAT_PID_FILE"
 start_brightness_daemon &
 BRIGHT_PID=$!
 
-# ── FAST VOLUME DAEMON ────────────────────────────────────────
-# Dedicated loop that applies per-app volume on foreground change
-start_volume_daemon() {
-    local VOL_DIR="$REFRESH_LOCK_DIR"
-    local UNIV_VOL="$EXTERNAL_CFG/universal_vol.txt"
-    local PREV_PKG=""
-    local VOL_TRIGGER="/dev/.davion_vol_retrigger"
+# ── VOLUME DAEMON REMOVED ─────────────────────────────────────
+# Volume management is now handled exclusively by per_app_daemon
+# to prevent race conditions and universal volume overrides.
 
-    while true; do
-        CURR_PKG=""
-        if [ -f "$GAME_STATE_FILE" ]; then
-            CURR_PKG=$(cat "$GAME_STATE_FILE" 2>/dev/null | tr -d '
-	 ')
-        fi
-        if [ -z "$CURR_PKG" ] && [ -f "$NORMAL_STATE_FILE" ]; then
-            CURR_PKG=$(cat "/dev/.davion_last_fg_pkg" 2>/dev/null | tr -d '
-	 ')
-        fi
-        # Fallback: poll foreground pkg directly if state files not yet written
-        if [ -z "$CURR_PKG" ]; then
-            CURR_PKG=$(dumpsys activity top 2>/dev/null                 | grep -m1 "ACTIVITY"                 | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+"                 | head -1)
-        fi
-
-        FORCE_APPLY=0
-        if [ -f "$VOL_TRIGGER" ]; then
-            TRIGGER_PKG=$(cat "$VOL_TRIGGER" 2>/dev/null | tr -d '
-	 ')
-            if [ -n "$TRIGGER_PKG" ] && [ "$TRIGGER_PKG" = "$CURR_PKG" ]; then
-                FORCE_APPLY=1
-            fi
-            rm -f "$VOL_TRIGGER"
-        fi
-
-        if [ -n "$CURR_PKG" ] && { [ "$CURR_PKG" != "$PREV_PKG" ] || [ "$FORCE_APPLY" = 1 ]; }; then
-            PREV_PKG="$CURR_PKG"
-            APP_VOL_FILE="$VOL_DIR/${CURR_PKG}.vol"
-            if [ -f "$APP_VOL_FILE" ]; then
-                VV=$(tr -d '[:space:]' < "$APP_VOL_FILE")
-                if [ -n "$VV" ] && [ "$VV" -ge 0 ] 2>/dev/null && [ "$VV" -le 100 ] 2>/dev/null; then
-                    apply_volume "$VV"
-                fi
-            elif [ -f "$UNIV_VOL" ]; then
-                UV=$(tr -d '[:space:]' < "$UNIV_VOL")
-                if [ -n "$UV" ] && [ "$UV" -ge 0 ] 2>/dev/null && [ "$UV" -le 100 ] 2>/dev/null; then
-                    apply_volume "$UV"
-                fi
-            fi
-        fi
-
-        sleep 0.5
-    done
-}
-
-start_volume_daemon &
-VOL_PID=$!
-
-log_msg "✅ Monitor started with PID: $MONITOR_PID | Brightness daemon PID: $BRIGHT_PID | Volume daemon PID: $VOL_PID"
+log_msg "✅ Monitor started with PID: $MONITOR_PID | Brightness daemon PID: $BRIGHT_PID"
 
 # Optional: Clean up on script exit
-trap "kill $MONITOR_PID $BRIGHT_PID $VOL_PID 2>/dev/null; rm -f $LOGCAT_PID_FILE" EXIT INT TERM
+trap "kill $MONITOR_PID $BRIGHT_PID 2>/dev/null; rm -f $LOGCAT_PID_FILE" EXIT INT TERM
 
 LOGCAT_PID=$!
 echo $LOGCAT_PID > "$LOGCAT_PID_FILE"
