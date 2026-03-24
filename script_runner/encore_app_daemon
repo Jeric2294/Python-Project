@@ -16,7 +16,6 @@ CFG_DIR="/sdcard/GovThermal/config"
 UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
 UNIVERSAL_BRIGHT_FILE="/sdcard/DAVION_ENGINE/universal_brightness.txt"
 UNIVERSAL_VOL_FILE="/sdcard/DAVION_ENGINE/universal_vol.txt"
-UNIVERSAL_SCREENTIMEOUT_FILE="$CFG_DIR/screen_timeout.txt"
 ENCORE_GAMELIST="/data/adb/.config/encore/gamelist.json"
 ENCORE_CFG="/data/adb/.config/encore/config.json"
 
@@ -59,6 +58,29 @@ get_app_label() {
 }
 
 # ── Kill other foreground apps for a package ──────────────────
+# ── Global toggle helpers ──────────────────────────────────────
+ko_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/ko_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]   # default ON if file missing
+}
+cache_global_enabled() {
+    local v
+    v=$(tr -d '[:space:]' < "$CFG_DIR/cache_global_enabled" 2>/dev/null)
+    [ "$v" != "0" ]   # default ON if file missing
+}
+# Check if pkg is a game (uses full WebUI-generated list, falls back to Encore list)
+is_game_pkg() {
+    local pkg="$1"
+    local gl="$CFG_DIR/gl_pkgs"
+    if [ -f "$gl" ]; then
+        grep -qFx "$pkg" "$gl" 2>/dev/null && return 0
+    else
+        gamelist_has_pkg "$pkg" && return 0
+    fi
+    return 1
+}
+
 # Reads $RR_DIR/$pkg.killothers (flag) + $RR_DIR/$pkg.killothers_bl (spare list)
 kill_others_for_pkg() {
     local pkg="$1"
@@ -66,8 +88,9 @@ kill_others_for_pkg() {
 
     local spare_list="$pkg"
     if [ -f "$RR_DIR/$pkg.killothers_bl" ]; then
+        # FIX: strip \r — WebUI writes CRLF; stray \r breaks grep -Fx matching
         spare_list="$spare_list
-$(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
+$(tr -d '\r' < "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
     fi
 
     local killed=0
@@ -118,48 +141,80 @@ $(cat "$RR_DIR/$pkg.killothers_bl" 2>/dev/null)"
         log_msg "Kill Others: 0 killed, $skipped already stopped — nothing to kill for $pkg"
     fi
 }
-
-# ── Clear cache on launch for a package ───────────────────────
-# Reads $RR_DIR/$pkg.cacheclear (flag) + $RR_DIR/$pkg.cacheclear_list (targets)
+# ── Clear selected app caches on launch ──────────────────────────────────
+# File: RR_DIR/pkg.cacheclear             — flag (trigger enabled/disabled)
+# File: /sdcard/DAVION_ENGINE/cache_selected.txt — apps to clear (from Panel 12)
+#
+# Clears only the apps that are checked/selected in the Cache Manager panel.
+# Same list that CLEAR SELECTED button in the panel uses.
 clear_cache_for_pkg() {
     local pkg="$1"
     [ -f "$RR_DIR/$pkg.cacheclear" ] || return
-    [ -f "$RR_DIR/$pkg.cacheclear_list" ] || return
+
+    local SELECTED_FILE="/sdcard/DAVION_ENGINE/cache_selected.txt"
+
+    # No selection = nothing to clear
+    [ -f "$SELECTED_FILE" ] || {
+        log_msg "Cache Clear: no selection file — skipping for $pkg"
+        return
+    }
 
     local cleared=0
     local skipped=0
-    local target
+    local target total_kb did_clear seen_real real_dir kb cache_dir
+
     while IFS= read -r target; do
-        [ -z "$target" ] && continue
+        # Strip CRLF from WebUI-written file
+        target=$(printf '%s' "$target" | tr -d '\r')
+        { [ -z "$target" ] || [ "$target" = "*" ]; } && continue
 
-        # Check if the cache dir actually has data before clearing
-        # /data/data/$pkg/cache — size 0 or missing means already empty
-        local cache_size=0
-        cache_size=$(du -sk "/data/data/$target/cache" 2>/dev/null | cut -f1)
-        # Also check /data/user/0/$pkg/cache for multi-user setups
-        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
-            cache_size=$(du -sk "/data/user/0/$target/cache" 2>/dev/null | cut -f1)
-        fi
+        # Always skip the launching app itself
+        [ "$target" = "$pkg" ] && { skipped=$((skipped + 1)); continue; }
 
-        if [ -z "$cache_size" ] || [ "$cache_size" = "0" ]; then
-            skipped=$((skipped + 1))
-            log_msg "  CacheClr: $target cache already empty — skipping"
-            continue
-        fi
+        # Skip system-critical packages
+        case "$target" in
+            android|com.android.systemui|com.android.phone|\
+            com.android.settings|com.android.launcher*|\
+            com.google.android.gms|com.google.android.gsf|\
+            com.topjohnwu.magisk|com.android.shell|\
+            com.transsion.hilauncher) skipped=$((skipped + 1)); continue ;;
+        esac
 
-        pm clear "$target" 2>/dev/null && {
+        total_kb=0
+        did_clear=0
+        seen_real=""
+
+        for cache_dir in \
+            "/data/user/0/$target/cache" \
+            "/data/user_de/0/$target/cache" \
+            "/data/data/$target/cache"; do
+            [ -d "$cache_dir" ] || continue
+            real_dir=$(readlink -f "$cache_dir" 2>/dev/null || echo "$cache_dir")
+            case "$seen_real" in *"|${real_dir}|"*) continue ;; esac
+            seen_real="${seen_real}|${real_dir}|"
+            kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
+            [ "${kb:-0}" = "0" ] && continue
+            rm -rf "${cache_dir:?}/"* 2>/dev/null
+            total_kb=$(( total_kb + ${kb:-0} ))
+            did_clear=1
+        done
+
+        if [ "$did_clear" = "1" ]; then
             cleared=$((cleared + 1))
-            log_msg "  CacheClr: cleared $target (was ~${cache_size}KB)"
-        }
-    done < "$RR_DIR/$pkg.cacheclear_list"
+            log_msg "  CacheClr: $target (~${total_kb}KB)"
+        else
+            skipped=$((skipped + 1))
+        fi
+
+    done < "$SELECTED_FILE"
 
     local label
     label=$(get_app_label "$pkg")
     if [ "$cleared" -gt 0 ]; then
-        de_notify "${cleared} app cache(s) cleared" "${label}" "success"
-        log_msg "Cache Clear: $cleared cleared, $skipped already empty — for $pkg"
-    elif [ "$skipped" -gt 0 ]; then
-        log_msg "Cache Clear: all $skipped caches already empty — nothing to clear for $pkg"
+        de_notify "${cleared} cache(s) cleared" "${label}" "success"
+        log_msg "Cache Clear: $cleared cleared, $skipped skipped — for $pkg"
+    else
+        log_msg "Cache Clear: nothing to clear ($skipped skipped) — for $pkg"
     fi
 }
 
@@ -199,7 +254,9 @@ gamelist_has_pkg() {
 # Returns the lite_mode value (true/false) for a pkg
 get_lite_mode() {
     local pkg="$1"
-    [ -f "$ENCORE_GAMELIST" ] || echo "false"; return
+    # FIX: was "|| echo "false"; return" — semicolon made return ALWAYS execute,
+    # so the awk block below was unreachable even when the file existed.
+    [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
     # Extract the block for this pkg and find lite_mode
     local val
     val=$(awk -v p="\"$pkg\"" '
@@ -216,7 +273,8 @@ get_lite_mode() {
 # Returns the enable_dnd value (true/false) for a pkg
 get_enable_dnd() {
     local pkg="$1"
-    [ -f "$ENCORE_GAMELIST" ] || echo "false"; return
+    # FIX: same always-early-return bug as get_lite_mode
+    [ -f "$ENCORE_GAMELIST" ] || { echo "false"; return; }
     local val
     val=$(awk -v p="\"$pkg\"" '
         $0 ~ p { found=1 }
@@ -231,7 +289,8 @@ get_enable_dnd() {
 
 # Check if enforce_lite_mode is globally set in config.json
 get_global_enforce_lite() {
-    [ -f "$ENCORE_CFG" ] || echo "false"; return
+    # FIX: same always-early-return bug as get_lite_mode
+    [ -f "$ENCORE_CFG" ] || { echo "false"; return; }
     local val
     val=$(grep -o '"enforce_lite_mode"[[:space:]]*:[[:space:]]*[a-z]*' "$ENCORE_CFG" 2>/dev/null \
         | grep -o "true\|false" | head -1)
@@ -358,46 +417,12 @@ restore_saturation() {
     _encore_last_sat_pkg=""
 }
 
-# ── Per-app screen off timeout ────────────────────────────────
-# Tracks the pkg whose screen timeout is currently overriding the universal.
-_screentimeout_active_pkg=""
-_st_last_fg_pkg=""   # dedicated fg tracker — fires only on real app change
-
 # ── Per-app Connection on Launch ──────────────────────────────
 # WiFi/Data are only enabled when currently OFF.
 # We track WHICH pkg enabled each so we only disable it when that app leaves.
 _conn_last_fg_pkg=""
 _conn_wifi_enabled_by=""   # pkg that turned WiFi ON; empty = we didn't touch it
 _conn_data_enabled_by=""   # pkg that turned Data ON;  empty = we didn't touch it
-
-apply_per_app_screentimeout() {
-    local pkg="$1"
-    local st_file="$RR_DIR/$pkg.screentimeout"
-    [ -f "$st_file" ] || return 1
-    local ms
-    ms=$(tr -d '[:space:]' < "$st_file")
-    [ -n "$ms" ] && [ "$ms" -gt 0 ] 2>/dev/null || return 1
-    settings put system screen_off_timeout "$ms" 2>/dev/null
-    _screentimeout_active_pkg="$pkg"
-    log_msg "  Screen timeout → ${ms}ms for $pkg"
-}
-
-restore_screentimeout() {
-    [ -z "$_screentimeout_active_pkg" ] && return   # nothing was applied
-    _screentimeout_active_pkg=""
-    # Restore to universal lock if set, else system default (30s)
-    if [ -f "$UNIVERSAL_SCREENTIMEOUT_FILE" ]; then
-        local ums
-        ums=$(tr -d '[:space:]' < "$UNIVERSAL_SCREENTIMEOUT_FILE")
-        if [ -n "$ums" ] && [ "$ums" -gt 0 ] 2>/dev/null; then
-            settings put system screen_off_timeout "$ums" 2>/dev/null
-            log_msg "  Screen timeout restored → ${ums}ms (universal)"
-            return
-        fi
-    fi
-    settings put system screen_off_timeout 30000 2>/dev/null
-    log_msg "  Screen timeout restored → 30000ms (default)"
-}
 
 # ── Conn-on-Launch helpers ────────────────────────────────────
 
@@ -513,7 +538,6 @@ activate_tweaks() {
     apply_per_app_brightness "$pkg"
     apply_per_app_volume "$pkg"
     apply_per_app_saturation "$pkg"
-    apply_per_app_screentimeout "$pkg"
 
     # DND
     [ "$enable_dnd_val" = "true" ] && enable_dnd
@@ -534,8 +558,8 @@ activate_tweaks() {
     # ── Kill Others: force-stop other apps now ────────────────
     kill_others_for_pkg "$pkg" &
 
-    # ── Cache Clear: clear caches of configured apps ──────────
-    clear_cache_for_pkg "$pkg" &
+    # ── Cache Clear: clear all other user app caches if configured ───────────
+    [ -f "$RR_DIR/$pkg.cacheclear" ] && clear_cache_for_pkg "$pkg" &
 }
 
 # ── Deactivate tweaks and revert to normal ────────────────────
@@ -552,7 +576,6 @@ deactivate_tweaks() {
     restore_brightness
     restore_volume
     restore_saturation
-    restore_screentimeout
 
     # DND
     disable_dnd
@@ -608,13 +631,6 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
             [ -n "$_mid" ] && [ "$_mid" -eq "$_mid" ] 2>/dev/null && service call SurfaceFlinger 1035 i32 "$_mid" >/dev/null 2>&1
             log_msg "  RR(lc): mode $_mid for $pkg"
         fi
-        # Screen Timeout
-        _sf="$RR_DIR/$pkg.screentimeout"
-        if [ -f "$_sf" ]; then
-            _sv=$(tr -d '[:space:]' < "$_sf")
-            [ -n "$_sv" ] && [ "$_sv" -gt 0 ] 2>/dev/null && settings put system screen_off_timeout "$_sv" 2>/dev/null
-            log_msg "  Timeout(lc): ${_sv}ms for $pkg"
-        fi
         # Connection on Launch
         _cf="$RR_DIR/$pkg.conn"
         if [ -f "$_cf" ]; then
@@ -627,13 +643,22 @@ FLAG_FILE="/dev/.encore_gamelist_updated"
         fi
         # Kill Others
         if [ -f "$RR_DIR/$pkg.killothers" ]; then
-            kill_others_for_pkg "$pkg"
-            log_msg "  KO(lc): ran for $pkg"
+            if is_game_pkg "$pkg" || ko_global_enabled; then
+                kill_others_for_pkg "$pkg"
+                log_msg "  KO(lc): ran for $pkg"
+            else
+                log_msg "  KO(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
-        # Cache Clear
+        # Cache Clear — fires if this app has cache clear enabled
+        # New behavior: clears ALL user app caches except spare list
         if [ -f "$RR_DIR/$pkg.cacheclear" ]; then
-            clear_cache_for_pkg "$pkg"
-            log_msg "  Cache(lc): ran for $pkg"
+            if cache_global_enabled; then
+                clear_cache_for_pkg "$pkg"
+                log_msg "  Cache(lc): ran for $pkg"
+            else
+                log_msg "  Cache(lc): skipped for $pkg — global toggle OFF"
+            fi
         fi
         # Encore Gaming Mode
         if gamelist_has_pkg "$pkg"; then
@@ -680,7 +705,6 @@ while true; do
 
     # ── Vol retrigger — WebUI signals after saving vol config ──
     if [ -f /dev/.davion_vol_retrigger ]; then
-        local retrig_pkg
         retrig_pkg=$(cat /dev/.davion_vol_retrigger 2>/dev/null | tr -d '[:space:]')
         rm -f /dev/.davion_vol_retrigger 2>/dev/null
         if [ -n "$retrig_pkg" ] && [ -f "$RR_DIR/$retrig_pkg.vol" ]; then
@@ -694,21 +718,6 @@ while true; do
     current_pkg=$(get_foreground_pkg)
     # ── Write shared foreground pkg for headset_daemon ────────
     echo "$current_pkg" > /dev/.davion_last_fg_pkg 2>/dev/null
-
-    # ── Per-app screen timeout — fires ONLY on real app change ──
-    # Uses _st_last_fg_pkg (not _active_pkg) so it doesn't fire every loop.
-    # Skips Encore-active apps — activate_tweaks/deactivate_tweaks handle those.
-    if [ "$current_pkg" != "$_st_last_fg_pkg" ]; then
-        _st_last_fg_pkg="$current_pkg"
-        # Only for non-Encore foreground apps
-        if [ "$current_pkg" != "$_active_pkg" ]; then
-            if [ -n "$current_pkg" ] && [ -f "$RR_DIR/$current_pkg.screentimeout" ]; then
-                apply_per_app_screentimeout "$current_pkg"
-            elif [ -n "$_screentimeout_active_pkg" ]; then
-                restore_screentimeout
-            fi
-        fi
-    fi
 
     # ── Per-app Connection on Launch — fires ONLY on real app change ──
     # Rule: WiFi/Data is enabled ONLY if currently OFF.
@@ -729,11 +738,21 @@ while true; do
     # double execution. Non-Encore apps with these flags are handled here.
     if [ "$current_pkg" != "$_ko_cc_last_pkg" ]; then
         _ko_cc_last_pkg="$current_pkg"
-        if [ -n "$current_pkg" ] && ! gamelist_has_pkg "$current_pkg"; then
-            [ -f "$RR_DIR/$current_pkg.killothers" ] && kill_others_for_pkg "$current_pkg" &
-            [ -f "$RR_DIR/$current_pkg.cacheclear" ] && \
-                [ -f "$RR_DIR/$current_pkg.cacheclear_list" ] && \
-                clear_cache_for_pkg "$current_pkg" &
+        if [ -n "$current_pkg" ]; then
+            # Kill Others — non-Encore apps only (Encore handled in activate_tweaks)
+            if ! gamelist_has_pkg "$current_pkg"; then
+                if [ -f "$RR_DIR/$current_pkg.killothers" ]; then
+                    if ko_global_enabled; then
+                        kill_others_for_pkg "$current_pkg" &
+                    fi
+                fi
+                # Cache clear — non-Encore apps only (flag alone is enough; spare list is optional)
+                if [ -f "$RR_DIR/$current_pkg.cacheclear" ]; then
+                    if cache_global_enabled; then
+                        clear_cache_for_pkg "$current_pkg" &
+                    fi
+                fi
+            fi
         fi
     fi
 
@@ -750,7 +769,10 @@ while true; do
         global_lite=$(get_global_enforce_lite)
         [ "$global_lite" = "true" ] && local_lite="true"
         dnd_val=$(get_enable_dnd "$current_pkg")
-        deactivate_tweaks "$current_pkg"
+        # FIX: deactivate whatever is currently active (_active_pkg), not current_pkg.
+        # When A→B→A, _active_pkg=B here — deactivate_tweaks(current_pkg=A) would
+        # skip B's mode revert and leave state inconsistent.
+        [ -n "$_active_pkg" ] && deactivate_tweaks "$_active_pkg"
         activate_tweaks "$current_pkg" "$local_lite" "$dnd_val"
         _was_bg=""
         sleep 1

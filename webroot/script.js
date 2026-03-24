@@ -117,6 +117,24 @@ function exec(cmd,timeout=5000){
 }
 const execAll=(...cmds)=>Promise.all(cmds.map(c=>exec(c)));
 
+// ── cleanLines: safe read of WebUI-written list files ─────────────────────
+// KSU/APatch native bridge can inject \r into strings passed through exec(),
+// causing package names to become "com.pkg\r" — silent failures everywhere.
+// Always use cleanLines() when reading any file written by this WebUI.
+function cleanLines(raw) {
+  return raw.replace(/\r/g, '').trim().split('\n').filter(Boolean);
+}
+
+// ── lsWrite: safe write of package list to a file ─────────────────────────
+// Uses printf '%s\n' per-arg instead of embedding a join('\n') string into the
+// shell command — avoids \r injection via the KSU/APatch exec bridge.
+// Usage: lsWrite(path, [...set])  → shell cmd string (pass to exec())
+function lsWrite(path, pkgs) {
+  if (!pkgs.length) return `rm -f ${path}`;
+  const args = pkgs.map(p => `'${p.replace(/'/g,"'\\''")}'`).join(' ');
+  return `mkdir -p "$(dirname ${path})" && printf '%s\\n' ${args} > ${path}`;
+}
+
 /* ── Auto-save: called after every apply action ─────────────
    Runs saveAllConfig() silently in background (non-blocking).
    A short debounce prevents redundant writes when multiple
@@ -273,6 +291,40 @@ function initFabSettings(){
     }
   });
 
+  // ── Restore KO global toggle state from disk ──────────────
+  exec(`cat ${KO_GLOBAL_CFG_FILE} 2>/dev/null`).then(raw => {
+    if (raw.trim() === '0') {
+      _koGlobalEnabled = false;
+      _syncKoMenuItem(false);
+    }
+  });
+
+  // ── Restore Cache global toggle state from disk ────────────
+  exec(`cat ${CACHE_GLOBAL_CFG_FILE} 2>/dev/null`).then(raw => {
+    if (raw.trim() === '0') {
+      _cacheGlobalEnabled = false;
+      _syncCacheMenuItem(false);
+    }
+  });
+
+  function _syncKoMenuItem(on) {
+    const icon  = document.getElementById('fab-ko-icon');
+    const label = document.getElementById('fab-ko-label');
+    const item  = document.getElementById('fab-menu-ko');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (label) label.textContent = on ? 'KILL OTHERS ON' : 'KILL OTHERS OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
+  }
+
+  function _syncCacheMenuItem(on) {
+    const icon  = document.getElementById('fab-cache-icon');
+    const label = document.getElementById('fab-cache-label');
+    const item  = document.getElementById('fab-menu-cache');
+    if (item)  item.setAttribute('aria-pressed', String(on));
+    if (label) label.textContent = on ? 'CLEAR CACHE ON' : 'CLEAR CACHE OFF';
+    if (item)  item.style.opacity = on ? '1' : '0.5';
+  }
+
   function _syncToastMenuItem(on) {
     const icon  = document.getElementById('fab-toast-icon');
     const label = document.getElementById('fab-toast-label');
@@ -339,6 +391,64 @@ function initFabSettings(){
     }
   });
 
+  document.getElementById('fab-menu-ko')?.addEventListener('click', async e => {
+    e.stopPropagation();
+    closeAll();
+    _koGlobalEnabled = !_koGlobalEnabled;
+    _syncKoMenuItem(_koGlobalEnabled);
+    await exec(`mkdir -p ${CFG_DIR} && echo '${_koGlobalEnabled ? '1' : '0'}' > ${KO_GLOBAL_CFG_FILE}`);
+    if (!_koGlobalEnabled) {
+      // Delete .killothers files for non-game apps only
+      await exec(
+        `GL="${CFG_DIR}/gl_pkgs"; ` +
+        `for f in ${RR_DIR}/*.killothers; do ` +
+        `  [ -f "$f" ] || continue; ` +
+        `  pkg=$(basename "$f" .killothers); ` +
+        `  if [ -f "$GL" ] && grep -qFx "$pkg" "$GL" 2>/dev/null; then continue; fi; ` +
+        `  rm -f "$f" "${RR_DIR}/\${pkg}.killothers_bl" 2>/dev/null; ` +
+        `done`
+      );
+      // Clear in-memory KO state for non-game apps
+      Object.keys(_koState).forEach(pkg => {
+        if (!_isGame(pkg)) {
+          _koState[pkg] = { on: false, bl: new Set() };
+        }
+      });
+    }
+    showToast(
+      _koGlobalEnabled ? 'Kill Others on Launch enabled' : 'Kill Others on Launch disabled',
+      'KILL OTHERS',
+      _koGlobalEnabled ? 'success' : 'info',
+      '⏹'
+    );
+  });
+
+  document.getElementById('fab-menu-cache')?.addEventListener('click', async e => {
+    e.stopPropagation();
+    closeAll();
+    _cacheGlobalEnabled = !_cacheGlobalEnabled;
+    _syncCacheMenuItem(_cacheGlobalEnabled);
+    await exec(`mkdir -p ${CFG_DIR} && echo '${_cacheGlobalEnabled ? '1' : '0'}' > ${CACHE_GLOBAL_CFG_FILE}`);
+    if (!_cacheGlobalEnabled) {
+      // Delete .cacheclear files for non-game apps only
+      await exec(
+        `GL="${CFG_DIR}/gl_pkgs"; ` +
+        `for f in ${RR_DIR}/*.cacheclear; do ` +
+        `  [ -f "$f" ] || continue; ` +
+        `  pkg=$(basename "$f" .cacheclear); ` +
+        `  if [ -f "$GL" ] && grep -qFx "$pkg" "$GL" 2>/dev/null; then continue; fi; ` +
+        `  rm -f "$f" "${RR_DIR}/\${pkg}.cacheclear_list" 2>/dev/null; ` +
+        `done`
+      );
+    }
+    showToast(
+      _cacheGlobalEnabled ? 'Clear Cache on Launch enabled' : 'Clear Cache on Launch disabled',
+      'CLEAR CACHE',
+      _cacheGlobalEnabled ? 'success' : 'info',
+      '🗑'
+    );
+  });
+
   menuExit.addEventListener("click", async e=>{
     e.stopPropagation();
     closeAll();
@@ -369,14 +479,117 @@ function initFabSettings(){
    § 5  Status bar
    ═══════════════════════════════════════════════════════════ */
 let _st=null;
-function setStatus(msg,color){
-  const el=document.getElementById('debug-msg');if(!el)return;
-  el.textContent=msg;el.style.color=color||'var(--a)';
-  clearTimeout(_st);_st=setTimeout(()=>{el.textContent='SYS READY · MODULE ONLINE';el.style.color='';},2800);
+let _tickerInterval = null;
+let _tickerIndex = 0;
+
+function _buildStatusTicker() {
+  const segments = ['SYS READY · MODULE ONLINE'];
+
+  // CPU profile
+  if (activeProfile) segments.push(`⚡ CPU ${activeProfile.toUpperCase()}`);
+
+  // GPU lock
+  const gpuOppEl = document.getElementById('gpu-opp-index-val');
+  const gpuLockEl = document.getElementById('gpu-lock-status');
+  if (gpuLockEl?.textContent === 'LOCKED' && gpuOppEl?.textContent !== '—')
+    segments.push(`🖥 GPU LOCK OPP${gpuOppEl.textContent}`);
+
+  // Universal RR
+  if (rrActive) segments.push(`🔒 RR ${rrActive}Hz`);
+
+  // Idle 60Hz
+  if (_idle60Enabled) segments.push(`📺 IDLE 60Hz ON`);
+
+  // RR Guard
+  if (_rrGuardEnabled) segments.push(`🛡 RR GUARD ON`);
+
+  // Deep Sleep Gov
+  if (deepSleepGovActive) segments.push(`💤 DEEP SLEEP ON`);
+
+  // Battery Saver
+  if (_battSaverEnabled) segments.push(`🔋 BATT SAVER ON`);
+
+  // Cool Mode
+  if (coolModeEnabled) segments.push(`❄ COOL MODE ON`);
+
+  // CPU Volt Optimizer
+  if (cpuVoltEnabled) segments.push(`⚡ VOLT OPT ON`);
+
+  // Pyrox Thermal
+  if (pyroxEnabled) segments.push(`🌡 PYROX ON`);
+
+  return segments;
+}
+
+function _tickStatus() {
+  const el    = document.getElementById('debug-msg');
+  const inner = document.getElementById('debug-msg-inner');
+  if (!el || !inner || _st) return; // skip if a transient status is showing
+
+  const segments = _buildStatusTicker();
+  if (segments.length <= 1) {
+    inner.textContent = segments[0];
+    inner.classList.remove('scrolling');
+    el.style.color = '';
+    return;
+  }
+
+  _tickerIndex = (_tickerIndex + 1) % segments.length;
+  const msg = segments[_tickerIndex];
+  inner.classList.remove('scrolling');
+  inner.style.paddingRight = '';
+  inner.textContent = msg;
+  el.style.color = _tickerIndex === 0 ? '' : 'var(--a)';
+
+  requestAnimationFrame(() => {
+    if (inner.scrollWidth > el.clientWidth) {
+      inner.style.paddingRight = '40px';
+      inner.textContent = msg + '      ' + msg;
+      inner.classList.add('scrolling');
+    }
+  });
+}
+
+function _startStatusTicker() {
+  clearInterval(_tickerInterval);
+  _tickerInterval = setInterval(_tickStatus, 3500);
+}
+
+function setStatus(msg, color) {
+  const el    = document.getElementById('debug-msg');
+  const inner = document.getElementById('debug-msg-inner');
+  if (!el || !inner) return;
+  inner.textContent = msg;
+  el.style.color = color || 'var(--a)';
+  // Scroll if text overflows — duplicate content for seamless loop
+  inner.classList.remove('scrolling');
+  inner.style.paddingRight = '';
+  requestAnimationFrame(() => {
+    if (inner.scrollWidth > el.clientWidth) {
+      inner.style.paddingRight = '40px';
+      inner.textContent = msg + '      ' + msg;
+      inner.classList.add('scrolling');
+    }
+  });
+  clearTimeout(_st);
+  _st = setTimeout(() => {
+    _st = null;
+    inner.classList.remove('scrolling');
+    inner.style.paddingRight = '';
+    const segments = _buildStatusTicker();
+    inner.textContent = segments[0];
+    el.style.color = '';
+  }, 2800);
 }
 /* ── Toast notifications ─────────────────────────────────── */
 let _toastEnabled = true;  // controlled by gear icon toggle; persisted to disk
 const TOAST_CFG_FILE = `${CFG_DIR}/toast_enabled`;
+
+let _koGlobalEnabled = true;  // controls KO visibility in App Configuration
+const KO_GLOBAL_CFG_FILE = `${CFG_DIR}/ko_global_enabled`;
+
+let _cacheGlobalEnabled = true;  // controls Cache visibility in App Configuration
+const CACHE_GLOBAL_CFG_FILE = `${CFG_DIR}/cache_global_enabled`;
 
 function showToast(msg, title='', type='success', icon='', dur=2800) {
   if (!_toastEnabled) return;
@@ -869,7 +1082,12 @@ async function loadHeaderDeviceInfo() {
     const savedOpp = savedOppRaw.trim();
     if (savedOpp && !isNaN(parseInt(savedOpp)) && Object.keys(_gpuFreqMap).length > 0) {
       const lockedFreq = _gpuFreqMap[parseInt(savedOpp)];
-      if (lockedFreq !== undefined) gpuLabel = lockedFreq + ' MHz';
+      if (lockedFreq !== undefined) {
+        gpuLabel = lockedFreq + ' MHz';
+        // Push locked freq to graph too — graph should always update
+        const gpuPanel = document.getElementById('gpu-freq-section')?.querySelector('.panel-details');
+        if (gpuPanel?.open) _pushGpuFreqSample(lockedFreq);
+      }
     }
     // Fallback: live cur_freq from kernel
     if (!gpuLabel) {
@@ -878,6 +1096,14 @@ async function loadHeaderDeviceInfo() {
         if      (gpuFreqVal > 1000000) gpuLabel = Math.round(gpuFreqVal / 1000000) + ' MHz';
         else if (gpuFreqVal > 1000)    gpuLabel = Math.round(gpuFreqVal / 1000) + ' MHz';
         else                           gpuLabel = gpuFreqVal + ' KHz';
+        // Push sample to history graph (only when panel is open to save resources)
+        const gpuPanel = document.getElementById('gpu-freq-section')?.querySelector('.panel-details');
+        if (gpuPanel?.open) {
+          const mhz = gpuFreqVal > 1000000 ? Math.round(gpuFreqVal / 1000000)
+                    : gpuFreqVal > 1000    ? Math.round(gpuFreqVal / 1000)
+                    : gpuFreqVal;
+          _pushGpuFreqSample(mhz);
+        }
       }
     }
     if (gpuDot) {
@@ -898,6 +1124,30 @@ async function loadHeaderDeviceInfo() {
     const gov = (savedGovRaw.trim().toUpperCase() || '—').split('\n')[0].trim();
     const gs  = gov === 'PERFORMANCE' ? 'hot' : gov === 'POWERSAVE' ? 'warn' : 'ok';
     _hdi('hsi-ctrl', gov, gs);
+
+    // TEMP tile
+    const tempVal = parseInt(tempRaw.trim());
+    if (!isNaN(tempVal) && tempVal > 0) {
+      const tempC = tempVal > 1000 ? Math.round(tempVal / 100) / 10 : tempVal;
+      const tempState = tempC >= 45 ? 'hot' : tempC >= 38 ? 'warn' : 'ok';
+      _hdi('hsi-temp', `${Math.round(tempC)}°C`, tempState);
+    }
+
+    // FREQ LIM tile
+    const freqLim = parseInt(freqLimitRaw.trim());
+    if (!isNaN(freqLim) && freqLim > 0 && freqLim !== 100) {
+      _hdi('hsi-freqlim', `${freqLim}%`, freqLim < 80 ? 'warn' : 'ok');
+    } else {
+      _hdi('hsi-freqlim', '100%', 'ok');
+    }
+
+    // I/O scheduler tile
+    const ioRaw = await exec(
+      'cat /sys/block/mmcblk0/queue/scheduler 2>/dev/null || ' +
+      'cat /sys/block/sda/queue/scheduler 2>/dev/null || echo "—"'
+    );
+    const ioMatch = ioRaw.match(/\[([^\]]+)\]/);
+    _hdi('hsi-io', ioMatch ? ioMatch[1].toUpperCase() : (ioRaw.trim().split('\n')[0] || '—'), 'ok');
 
   } catch(e) { /* silent */ }
 }
@@ -1116,6 +1366,7 @@ function initUniversalBrightness() {
    § 10  Per-App list
    ═══════════════════════════════════════════════════════════ */
 let currentPkg = '';
+let _currentPopupIsGame = false;  // tracks whether current popup is Game or App config
 let _popupSpare60On = false;  // per-app spare from 60Hz drop state
 let _popupHvolOn   = false;   // per-app headset volume enabled
 let _popupHvolVal  = 7;       // per-app headset volume level (0-15)
@@ -1151,7 +1402,7 @@ async function loadAppList() {
     exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 8000),
     exec(
       `cd ${RR_DIR} 2>/dev/null || exit 0; ` +
-      `for f in *.mode *.bright *.vol *.forcedark *.sat *.hvol_on *.screentimeout; do ` +
+      `for f in *.mode *.bright *.vol *.forcedark *.sat *.hvol_on; do ` +
       `  [ -f "$f" ] || continue; ` +
       `  echo "\${f%.*}"; ` +
       `done | sort -u`
@@ -2118,121 +2369,6 @@ function initUniversalVolume() {
   loadUniversalVolume();
 }
 
-/* ═══════════════════════════════════════════════════════════
-   UNIVERSAL SCREEN OFF TIMEOUT
-   Values mirror Android Settings → Display → Screen Timeout
-   Stored in /sdcard/GovThermal/config/screen_timeout.txt
-   Applied via: settings put system screen_off_timeout <ms>
-   Per-app stored in $RR_DIR/$pkg.screentimeout
-   ═══════════════════════════════════════════════════════════ */
-const SCREEN_TIMEOUT_FILE = `${CFG_DIR}/screen_timeout.txt`;
-const SCREEN_TIMEOUT_OPTS = [
-  { ms: 30000,   label: '30 SEC' },
-  { ms: 60000,   label: '1 MIN'  },
-  { ms: 120000,  label: '2 MIN'  },
-  { ms: 300000,  label: '5 MIN'  },
-  { ms: 600000,  label: '10 MIN' },
-  { ms: 1200000, label: '20 MIN' },
-];
-let _univScreenTimeoutMs = null;
-
-function _msToScreenLabel(ms) {
-  const opt = SCREEN_TIMEOUT_OPTS.find(o => o.ms === ms);
-  return opt ? opt.label : (ms > 0 ? `${Math.round(ms/60000)} MIN` : 'DEFAULT');
-}
-
-function _updateScreenTimeoutChips(containerId, activeMsOrNull) {
-  document.querySelectorAll(`#${containerId} .screentimeout-chip`).forEach(chip => {
-    const ms = parseInt(chip.dataset.ms);
-    chip.classList.toggle('screentimeout-chip--active',
-      activeMsOrNull !== null && ms === activeMsOrNull);
-  });
-}
-
-async function initUniversalScreenTimeout() {
-  const activeEl = document.getElementById('univ-screentimeout-active');
-  const applyBtn = document.getElementById('btn-screentimeout-apply');
-  const resetBtn = document.getElementById('btn-screentimeout-reset');
-
-  // ── Load + display current state ──────────────────────────
-  async function _loadState() {
-    const saved = (await exec(`cat ${SCREEN_TIMEOUT_FILE} 2>/dev/null`)).trim();
-    const savedMs = saved && !isNaN(parseInt(saved)) ? parseInt(saved) : null;
-    _univScreenTimeoutMs = savedMs;
-    if (activeEl) activeEl.textContent = savedMs ? _msToScreenLabel(savedMs) : '—';
-    _updateScreenTimeoutChips('univ-screentimeout-chips', savedMs);
-    // Sync selected state so APPLY button label is correct if reopened
-    if (applyBtn) {
-      if (savedMs) {
-        applyBtn.disabled = false;
-        applyBtn.textContent = `⏱ APPLY ${_msToScreenLabel(savedMs)} ›`;
-      } else {
-        applyBtn.disabled = true;
-        applyBtn.textContent = '⏱ SELECT A DURATION ›';
-      }
-    }
-    return savedMs;
-  }
-
-  // Reload every time the subpanel opens (so it's always fresh)
-  const subpanel = document.getElementById('univ-screen-timeout-section');
-  subpanel?.addEventListener('toggle', () => {
-    if (subpanel.open) _loadState();
-  }, { passive: true });
-
-  // Initial load
-  await _loadState();
-
-  // ── Track selected chip ────────────────────────────────────
-  // Use a module-level ref so Apply always uses the latest selection
-  let _selectedMs = _univScreenTimeoutMs;
-
-  document.getElementById('univ-screentimeout-chips')?.addEventListener('click', e => {
-    const chip = e.target.closest('.screentimeout-chip');
-    if (!chip) return;
-    _selectedMs = parseInt(chip.dataset.ms);
-    _updateScreenTimeoutChips('univ-screentimeout-chips', _selectedMs);
-    if (applyBtn) {
-      applyBtn.disabled = false;
-      applyBtn.textContent = `⏱ APPLY ${chip.dataset.label.toUpperCase()} ›`;
-    }
-  }, { passive: true });
-
-  // ── Apply ─────────────────────────────────────────────────
-  applyBtn?.addEventListener('click', async () => {
-    if (!_selectedMs || _selectedMs <= 0) {
-      showToast('Select a duration first', 'SCREEN TIMEOUT', 'info', '⏱');
-      return;
-    }
-    applyBtn.disabled = true;
-    applyBtn.textContent = '⏱ APPLYING…';
-    await exec(`settings put system screen_off_timeout ${_selectedMs} 2>/dev/null`);
-    await exec(`mkdir -p ${CFG_DIR} && echo "${_selectedMs}" > ${SCREEN_TIMEOUT_FILE}`);
-    _univScreenTimeoutMs = _selectedMs;
-    if (activeEl) activeEl.textContent = _msToScreenLabel(_selectedMs);
-    applyBtn.disabled = false;
-    applyBtn.textContent = `⏱ APPLY ${_msToScreenLabel(_selectedMs)} ›`;
-    showToast(`Screen timeout: ${_msToScreenLabel(_selectedMs)}`, 'SCREEN TIMEOUT', 'success', '⏱');
-    autoSave();
-  });
-
-  // ── Reset ─────────────────────────────────────────────────
-  resetBtn?.addEventListener('click', async () => {
-    await exec('settings put system screen_off_timeout 30000 2>/dev/null');
-    await exec(`rm -f ${SCREEN_TIMEOUT_FILE}`);
-    _univScreenTimeoutMs = null;
-    _selectedMs = null;
-    _updateScreenTimeoutChips('univ-screentimeout-chips', null);
-    if (activeEl) activeEl.textContent = '—';
-    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '⏱ SELECT A DURATION ›'; }
-    showToast('Screen timeout reset to system default', 'SCREEN TIMEOUT', 'info', '⏱');
-    autoSave();
-  });
-}
-
-/* ── Per-App Screen Timeout boot restore ── */
-/* (Applied by encore_app_daemon on foreground — see saveAllConfig boot script) */
-
 /* ── Universal slider fill sync — works for any <input type=range> ── */
 function updateBrightSliderFill(val) {
   const slider = document.getElementById('popup-bright-slider');
@@ -2334,8 +2470,7 @@ document.addEventListener('click', e => {
    ═══════════════════════════════════════════════════════════ */
 let cachedModes = null;
 // Tracks the values loaded when popup opens — used to detect if user changed anything
-let _popupInitial = { mode: '', bright: -1, vol: -1, fd: false, spare60: false, hvol_on: false, hvol_val: 7, screentimeout_ms: null };
-let _popupScreentimeoutMs = null;  // per-app screen timeout loaded for current popup
+let _popupInitial = { mode: '', bright: -1, vol: -1, fd: false, spare60: false, hvol_on: false, hvol_val: 7 };
 let _popupConnType = null;  // 'wifi' | 'data' | 'both' | null
 
 function _updatePopupConnUI(type) {
@@ -2361,6 +2496,7 @@ function _updatePopupConnUI(type) {
 
 async function openPopup(pkg, gearElement, isGame = false) {
   currentPkg = pkg;
+  _currentPopupIsGame = isGame;
   const overlay = document.getElementById('floating-popup');
   const bubble = overlay.querySelector('.app-config-bubble');
   const pkgEl   = document.getElementById('popup-pkg-display');
@@ -2374,11 +2510,18 @@ async function openPopup(pkg, gearElement, isGame = false) {
     const el = document.getElementById(id);
     if (el) el.style.display = isGame ? '' : 'none';
   });
-  // Kill Others + Connection on Launch + Cache Clear — show for BOTH apps and games
-  ['popup-ko-block', 'popup-conn-block', 'popup-cache-block'].forEach(id => {
+  // Connection on Launch + Cache Clear — show for BOTH apps and games
+  ['popup-conn-block'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = '';
   });
+  // Kill Others — only show if globally enabled via gear toggle
+  // Kill Others — always in Game Config; in App Config only if gear toggle is ON
+  const _koBlockEl = document.getElementById('popup-ko-block');
+  if (_koBlockEl) _koBlockEl.style.display = (isGame || _koGlobalEnabled) ? '' : 'none';
+  // Clear Cache — always in Game Config; in App Config only if gear toggle is ON
+  const _cacheBlockEl = document.getElementById('popup-cache-block');
+  if (_cacheBlockEl) _cacheBlockEl.style.display = (isGame || _cacheGlobalEnabled) ? '' : 'none';
 
 
 
@@ -2591,18 +2734,15 @@ async function openPopup(pkg, gearElement, isGame = false) {
     if (cacheBtn._cacheHandler) cacheBtn.removeEventListener('click', cacheBtn._cacheHandler);
     cacheBtn._cacheHandler = async () => {
       const cur = cacheBtn.getAttribute('aria-pressed') === 'true';
-      if (cur) {
-        // Already ON — re-open popup to edit app list, do NOT toggle off
-        _openCacheClearPopup(pkg);
-        return;
+      const next = !cur;
+      cacheBtn.setAttribute('aria-pressed', String(next));
+      cacheBtn.classList.toggle('gaming-toggle-btn--on', next);
+      if (cacheLabel) cacheLabel.textContent = next ? 'ON' : 'OFF';
+      if (next) {
+        await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
+      } else {
+        await exec(`rm -f ${RR_DIR}/${pkg}.cacheclear`);
       }
-      // Turning ON
-      cacheBtn.setAttribute('aria-pressed', 'true');
-      cacheBtn.classList.add('gaming-toggle-btn--on');
-      if (cacheLabel) cacheLabel.textContent = 'ON';
-      await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${pkg}.cacheclear`);
-      // Open sub-popup to select apps
-      _openCacheClearPopup(pkg);
     };
     cacheBtn.addEventListener('click', cacheBtn._cacheHandler);
   }
@@ -2656,14 +2796,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     }
   }
 
-  // Load per-app screen off timeout
-  {
-    const stRaw = (await exec(`cat ${RR_DIR}/${pkg}.screentimeout 2>/dev/null`)).trim();
-    _popupScreentimeoutMs = stRaw && !isNaN(parseInt(stRaw)) ? parseInt(stRaw) : null;
-    const stValEl = document.getElementById('popup-screentimeout-val');
-    if (stValEl) stValEl.textContent = _popupScreentimeoutMs ? _msToScreenLabel(_popupScreentimeoutMs) : 'DEFAULT';
-    _updateScreenTimeoutChips('popup-screentimeout-chips', _popupScreentimeoutMs);
-  }
 
   _popupInitial = {
     mode:            _initSel?.dataset.value || '',
@@ -2681,7 +2813,6 @@ async function openPopup(pkg, gearElement, isGame = false) {
     spare60:         _popupSpare60On,
     hvol_on:         _popupHvolOn,
     hvol_val:        _popupHvolVal,
-    screentimeout_ms: _popupScreentimeoutMs,
   };
   _popupConnType = connOnDisk;
 
@@ -2773,8 +2904,7 @@ async function applyRefreshLock() {
     curCacheOn   === _popupInitial.cache_on &&
     (document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true') === _popupInitial.spare60 &&
     (document.getElementById('popup-hvol-toggle')?.getAttribute('aria-pressed') === 'true') === _popupInitial.hvol_on &&
-    (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val &&
-    _popupScreentimeoutMs === _popupInitial.screentimeout_ms
+    (parseInt(document.getElementById('popup-hvol-slider')?.value) || 7) === _popupInitial.hvol_val
   );
   if (nothingChanged) {
     closePopup();
@@ -2894,8 +3024,11 @@ async function applyRefreshLock() {
 
   // ── Save Kill Others state from popup ────────────────────────
   if (!_koState[currentPkg]) _koState[currentPkg] = { on: false, bl: new Set() };
-  _koState[currentPkg].on = curKoOn;
-  if (curKoOn) {
+  // Only save KO for games always; for apps only if global toggle is ON
+  const _koAllowed = _currentPopupIsGame || _koGlobalEnabled;
+  const _koSave = curKoOn && _koAllowed;
+  _koState[currentPkg].on = _koSave;
+  if (_koSave) {
     await exec(`mkdir -p ${RR_DIR} && echo '1' > ${RR_DIR}/${currentPkg}.killothers`);
     configuredPkgs.add(currentPkg);
   } else {
@@ -2912,7 +3045,9 @@ async function applyRefreshLock() {
   }
 
   // ── Save Cache Clear On Launch state ─────────────────────────
-  if (curCacheOn) {
+  const _cacheAllowed = _currentPopupIsGame || _cacheGlobalEnabled;
+  const _cacheSave = curCacheOn && _cacheAllowed;
+  if (_cacheSave) {
     await exec(`mkdir -p ${RR_DIR} && touch ${RR_DIR}/${currentPkg}.cacheclear`);
     configuredPkgs.add(currentPkg);
   } else {
@@ -2924,9 +3059,9 @@ async function applyRefreshLock() {
   const hasBright   = bv >= 0;
   const hasVol      = vv >= 0;
   const hasFd       = fdOn;
-  const hasKo       = curKoOn;
+  const hasKo       = _koSave;
   const hasConn     = !!curConn;
-  const hasCache    = curCacheOn;
+  const hasCache    = _cacheSave;
   const hasEncore   = encoreOn && encoreSaveResult?.ok;
   const hasSpare    = document.getElementById('popup-spare60-btn')?.getAttribute('aria-pressed') === 'true';
   const hasAnything = hasMode || hasBright || hasVol || hasFd || hasKo || hasConn || hasCache || hasEncore || hasSpare;
@@ -3000,13 +3135,6 @@ async function applyRefreshLock() {
     } else {
       await exec(`rm -f ${RR_DIR}/${currentPkg}.hvol_on`);
     }
-  }
-
-  // Save per-app screen off timeout
-  if (_popupScreentimeoutMs && _popupScreentimeoutMs > 0) {
-    await exec(`mkdir -p ${RR_DIR} && echo '${_popupScreentimeoutMs}' > ${RR_DIR}/${currentPkg}.screentimeout`);
-  } else {
-    await exec(`rm -f ${RR_DIR}/${currentPkg}.screentimeout`);
   }
 
   setTimeout(closePopup, 500);
@@ -3315,7 +3443,6 @@ async function saveAllConfig(){
     '#!/system/bin/sh',
     '# Boot config restore — DavionEngine',
     `FREQ_FILE="${FREQ_FILE}"`,
-    `SCREEN_TIMEOUT_FILE="${SCREEN_TIMEOUT_FILE}"`,
     '',
     `echo "${prof}" > ${CFG_DIR}/active_profile`,
     '',
@@ -3390,9 +3517,6 @@ async function saveAllConfig(){
     `  fi`,
     `fi`,
     '',
-    '# 12. Screen off timeout restore',
-    `_st=$(cat "${SCREEN_TIMEOUT_FILE}" 2>/dev/null | tr -d ' \\n')`,
-    `[ -n "$_st" ] && [ "$_st" -gt 0 ] 2>/dev/null && settings put system screen_off_timeout "$_st" || true`,
   ].filter(l=>l!==null).join('\n');
 
   await exec(
@@ -3846,6 +3970,43 @@ document.addEventListener('DOMContentLoaded',async()=>{
 
   initTheme();
   initFabSettings();
+  _startStatusTicker();
+
+  // ── Android back button — close open panel instead of navigating away ──
+  // Push 2 states: one sentinel + one buffer so popstate always fires before exit
+  history.pushState({ panelApp: true }, '');
+  history.pushState({ panelApp: true }, '');
+  window.addEventListener('popstate', e => {
+    // First, try to close any open nested subpanels (adv-details)
+    const openSubpanels = document.querySelectorAll('.adv-details[open]');
+    if (openSubpanels.length > 0) {
+      // Close all nested subpanels
+      openSubpanels.forEach(subpanel => {
+        subpanel.removeAttribute('open');
+      });
+      // Scroll back to top of the current panel
+      const openPanel = document.querySelector('.nexus-panel .panel-details[open]')?.closest('.nexus-panel');
+      if (openPanel) {
+        openPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      // Re-push so next back press can close the main panel
+      history.pushState({ panelApp: true }, '');
+      return;
+    }
+    
+    // If no subpanels open, close the main panel
+    const openDetails = document.querySelector('.nexus-panel .panel-details[open]');
+    if (openDetails) {
+      openDetails.removeAttribute('open');
+      _applyPanelFocus();
+      // Re-push so next back press still triggers popstate
+      history.pushState({ panelApp: true }, '');
+    } else {
+      // All panels closed — push again to prevent accidental WebView exit
+      // User needs to press back twice with no panels open to exit
+      history.pushState({ panelApp: true }, '');
+    }
+  });
   _initAllSliderFills();
 
   // Set --header-h so sticky panel summaries sit flush under the sticky header
@@ -3871,8 +4032,16 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const det = panel.querySelector('.panel-details');
     if (!det) return;
     det.addEventListener('toggle', () => {
+      // Save scroll position BEFORE _applyPanelFocus() causes reflow.
+      // When a panel closes, all hidden panels get display:'' again — the
+      // DOM reflow resets window.scrollY to 0. We capture the position
+      // here (before the reflow) and restore it on the next animation frame.
+      const savedScroll = det.open ? null : window.scrollY;
       _updatePanelSummaryHeight(panel);
       _applyPanelFocus();
+      if (savedScroll !== null) {
+        requestAnimationFrame(() => window.scrollTo({ top: savedScroll, behavior: 'instant' }));
+      }
     }, { passive: true });
     _updatePanelSummaryHeight(panel);
   });
@@ -3884,6 +4053,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const openPanel = document.querySelector('.nexus-panel .panel-details[open]')?.closest('.nexus-panel');
     const statusBar = document.getElementById('main-status-bar');
     document.querySelectorAll('.nexus-panel').forEach(p => {
+      if (p.dataset.hiddenByToggle === '1') return;
       if (openPanel) {
         p.style.display = (p === openPanel) ? '' : 'none';
       } else {
@@ -3917,7 +4087,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initZramManager();
   initUniversalBrightness();
   initUniversalVolume();
-  initUniversalScreenTimeout();
   initHeadsetConfig();
   initCoolMode();
   initCpuVoltOptimizer();
@@ -4018,16 +4187,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
     sl.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
-  // ── Per-app screen off timeout chips ─────────────────────────────────
-  document.getElementById('popup-screentimeout-chips')?.addEventListener('click', e => {
-    const chip = e.target.closest('.screentimeout-chip');
-    if (!chip) return;
-    const ms = parseInt(chip.dataset.ms);
-    // ms=0 means "DEFAULT" chip → clear the per-app override
-    _popupScreentimeoutMs = ms > 0 ? ms : null;
-    _updateScreenTimeoutChips('popup-screentimeout-chips', _popupScreentimeoutMs);
-    const valEl = document.getElementById('popup-screentimeout-val');
-    if (valEl) valEl.textContent = _popupScreentimeoutMs ? _msToScreenLabel(_popupScreentimeoutMs) : 'DEFAULT';  }, { passive: true });
   document.getElementById('popup-sat-slider')?.addEventListener('input', function() {
     const v = parseInt(this.value);
     const lbl = document.getElementById('popup-sat-val');
@@ -4728,6 +4887,9 @@ async function loadGameListPanel() {
   const merged = [...new Set([...intentPkgs, ...dumpPkgs, ...encoreGamePkgs])].sort();
   _glPkgs = merged;
 
+  // Write game list to disk so encore_app_daemon can detect games accurately
+  exec(lsWrite(`${CFG_DIR}/gl_pkgs`, merged));
+
   _glLoaded = true;
 
   // Update ribbon
@@ -4901,6 +5063,7 @@ function _renderGpuUI(oppIndex, locked) {
 
 async function loadGpuPanel() {
   await _buildGpuFreqMap();
+  _renderOppTable();
 
   // Priority 1: saved file
   let oppIndex = 0;
@@ -4908,12 +5071,143 @@ async function loadGpuPanel() {
   if (saved && !isNaN(parseInt(saved))) {
     oppIndex = parseInt(saved);
     _renderGpuUI(oppIndex, true);
+    _highlightOppRow(oppIndex);
     return;
   }
   // Priority 2: kernel current
   const kernel = (await exec(`cat ${GPU_OPP_NODE} 2>/dev/null`)).trim();
   oppIndex = (!kernel || isNaN(parseInt(kernel))) ? 0 : parseInt(kernel);
   _renderGpuUI(oppIndex, false);
+  _highlightOppRow(oppIndex);
+}
+
+// ── OPP Table ─────────────────────────────────────────────────
+function _renderOppTable() {
+  const table = document.getElementById('gpu-opp-table');
+  if (!table) return;
+  // If only 1 entry found from kernel, expand _gpuFreqMap in-place using fallback formula
+  // so that applyGpuLock, _gpuFreqLabel, and the table all use the same consistent data
+  if (Object.keys(_gpuFreqMap).length <= 1) {
+    const maxMHz = _gpuFreqMap[0] ?? 886;
+    const minMHz = _gpuFreqMap[_gpuOppMax] ?? Math.round(maxMHz * 0.42);
+    for (let i = 0; i <= _gpuOppMax; i++)
+      _gpuFreqMap[i] = Math.round(maxMHz - (maxMHz - minMHz) * i / _gpuOppMax);
+  }
+  const entries = Object.entries(_gpuFreqMap).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+  if (!entries.length) { table.innerHTML = '<span class="mono" style="font-size:9px;color:var(--dim);padding:6px;">OPP data unavailable</span>'; return; }
+  const maxFreq = Math.max(...entries.map(e => e[1]));
+  const minFreq = Math.min(...entries.map(e => e[1]));
+  table.innerHTML = entries.map(([idx, freq]) => {
+    const pct = maxFreq === minFreq ? 100 : Math.round((freq - minFreq) / (maxFreq - minFreq) * 100);
+    const isMax = parseInt(idx) === 0;
+    const isMin = parseInt(idx) === _gpuOppMax;
+    return `<div class="gpu-opp-row" data-opp="${idx}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:5px;cursor:pointer;touch-action:manipulation;border:0.5px solid transparent;transition:background 0.15s,border-color 0.15s;">
+      <span class="mono" style="font-size:9px;color:var(--dim);width:36px;flex-shrink:0;">OPP ${idx}</span>
+      <div style="flex:1;height:4px;border-radius:2px;background:rgba(var(--a-rgb),0.1);overflow:hidden;">
+        <div style="height:100%;width:${pct}%;background:var(--a);border-radius:2px;transition:width 0.3s;"></div>
+      </div>
+      <span class="mono" style="font-size:10px;color:var(--a);width:56px;text-align:right;flex-shrink:0;">${freq} MHz${isMax ? ' ▲' : isMin ? ' ▼' : ''}</span>
+    </div>`;
+  }).join('');
+  table.querySelectorAll('.gpu-opp-row').forEach(row => {
+    const _oppRowHandler = () => {
+      const opp = parseInt(row.dataset.opp);
+      const slider = document.getElementById('gpu-opp-slider');
+      if (slider) {
+        slider.value = _gpuOppMax - opp;
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        _syncSliderFill(slider);
+      }
+      _highlightOppRow(opp);
+    };
+    row.addEventListener('click', _oppRowHandler, { passive: true });
+    row.addEventListener('touchend', e => { e.preventDefault(); _oppRowHandler(); });
+  });
+}
+
+function _highlightOppRow(oppIndex) {
+  document.querySelectorAll('.gpu-opp-row').forEach(r => {
+    const active = parseInt(r.dataset.opp) === oppIndex;
+    r.style.background = active ? 'rgba(var(--a-rgb),0.10)' : '';
+    r.style.borderColor = active ? 'rgba(var(--a-rgb),0.35)' : 'transparent';
+  });
+}
+
+// ── Frequency History Graph ────────────────────────────────────
+const _gpuFreqHistory = [];   // { ts, mhz }
+const GPU_HISTORY_WINDOW = 30000;  // 30s
+
+function _pushGpuFreqSample(mhz) {
+  const now = Date.now();
+  _gpuFreqHistory.push({ ts: now, mhz });
+  // Trim old samples outside window
+  const cutoff = now - GPU_HISTORY_WINDOW;
+  while (_gpuFreqHistory.length && _gpuFreqHistory[0].ts < cutoff) _gpuFreqHistory.shift();
+  // Use rAF so canvas has correct offsetWidth if panel just opened
+  requestAnimationFrame(_drawGpuGraph);
+}
+
+function _drawGpuGraph() {
+  const canvas = document.getElementById('gpu-freq-graph');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Match canvas pixel size to display size
+  const W = canvas.offsetWidth || 300;
+  const H = canvas.offsetHeight || 52;
+  canvas.width  = W;
+  canvas.height = H;
+  ctx.clearRect(0, 0, W, H);
+
+  if (_gpuFreqHistory.length < 2) {
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Collecting data…', W / 2, H / 2 + 4);
+    return;
+  }
+
+  const now   = Date.now();
+  const freqs = _gpuFreqHistory.map(s => s.mhz);
+  const maxF  = Math.max(...freqs, 1);
+  const minF  = Math.min(...freqs);
+  const range = maxF - minF || 1;
+
+  // Get theme accent color from CSS variable
+  const accentRaw = getComputedStyle(document.documentElement).getPropertyValue('--a').trim() || '#7fff00';
+
+  // Draw gradient fill under line
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, accentRaw.startsWith('#') ? accentRaw + '55' : 'rgba(127,255,0,0.33)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  _gpuFreqHistory.forEach((s, i) => {
+    const x = ((s.ts - (now - GPU_HISTORY_WINDOW)) / GPU_HISTORY_WINDOW) * W;
+    const y = H - ((s.mhz - minF) / range) * (H - 8) - 4;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  // Close fill path to bottom
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw line
+  ctx.beginPath();
+  _gpuFreqHistory.forEach((s, i) => {
+    const x = ((s.ts - (now - GPU_HISTORY_WINDOW)) / GPU_HISTORY_WINDOW) * W;
+    const y = H - ((s.mhz - minF) / range) * (H - 8) - 4;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = accentRaw;
+  ctx.lineWidth   = 1.5;
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+
+  // Peak label
+  const peakEl = document.getElementById('gpu-graph-peak');
+  if (peakEl) peakEl.textContent = `PEAK ${maxF} MHz`;
 }
 
 async function applyGpuLock() {
@@ -4939,8 +5233,8 @@ async function applyGpuLock() {
   await exec(`su -c "chmod 664 /sys/kernel/ged/hal/dcs_mode 2>/dev/null && echo 0 > /sys/kernel/ged/hal/dcs_mode" 2>/dev/null`);
 
   _renderGpuUI(oppIndex, true);
+  _highlightOppRow(oppIndex);
   const freq = _gpuFreqLabel(oppIndex);
-  setStatus(`⚡ GPU locked → ${freq} (OPP ${oppIndex}, GED upbound set)`);
   showToast(`GPU locked at ${freq}`, 'GPU FREQ', 'success', '⚡');
 
   // Update HDI strip immediately
@@ -4968,6 +5262,7 @@ async function unlockGpu() {
   const cur = (await exec(`cat ${GPU_OPP_NODE} 2>/dev/null`)).trim();
   const idx  = (!cur || isNaN(parseInt(cur)) || parseInt(cur) === -1) ? 0 : parseInt(cur);
   _renderGpuUI(idx, false);
+  _highlightOppRow(-1); // clear all highlights on unlock
   setStatus('GPU unlocked — driver controls frequency');
   showToast('GPU unlocked', 'GPU FREQ', 'info', '🔓');
   autoSave();
@@ -5779,9 +6074,9 @@ async function loadIdle60Panel() {
 
   _idle60Enabled = enabledRaw.trim() === '1';
   _idle60Delay   = parseInt(delayRaw.trim()) || 5;
-  spareRaw.trim().split('\n').filter(Boolean).forEach(p => _idle60SpareSet.add(p));
+  cleanLines(spareRaw).forEach(p => _idle60SpareSet.add(p));
   _idle60DelayMap = {};
-  delaysRaw.trim().split('\n').filter(Boolean).forEach(line => {
+  cleanLines(delaysRaw).forEach(line => {
     const [p, d] = line.split(':');
     if (p && d) _idle60DelayMap[p.trim()] = parseInt(d.trim());
   });
@@ -6051,7 +6346,7 @@ async function _saveIdle60Spare() {
   const inSet = new Set([..._idle60SpareSet]);
 
   // Read current file to find packages not managed by the idle60 panel set
-  const existing = (await exec(`cat ${IDLE60_SPARE_FILE} 2>/dev/null`)).trim().split('\n').filter(Boolean);
+  const existing = cleanLines(await exec(`cat ${IDLE60_SPARE_FILE} 2>/dev/null`));
 
   // Merge: keep all existing entries + add any in set not already there
   const merged = new Set(existing);
@@ -6067,8 +6362,7 @@ async function _saveIdle60Spare() {
 
   // Simplest correct approach: just write the set — per-app toggles already wrote their changes
   if (!inSet.size) { await exec(`rm -f ${IDLE60_SPARE_FILE}`); return; }
-  const args = [...inSet].map(p => JSON.stringify(p)).join(' ');
-  await exec(`mkdir -p /sdcard/DAVION_ENGINE && printf '%s\n' ${args} > ${IDLE60_SPARE_FILE}`);
+  await exec(lsWrite(IDLE60_SPARE_FILE, [...inSet]));
 }
 
 
@@ -6284,12 +6578,6 @@ function initGlobalSearch() {
       action: () => scrollToPanel('cpu-gov-section', true) },
     { icon:'🖥', label:'GPU FREQUENCY',             sub:'GPU · Frequency Control',             badge:'SETTING',
       action: () => scrollToPanel('gpu-freq-section', true) },
-    { icon:'⏱', label:'SCREEN OFF TIMEOUT',        sub:'Universal RR → Screen Off Timeout',   badge:'SETTING',
-      action: () => scrollToPanel('rr-panel-section', true, 'univ-screen-timeout-section') },
-    { icon:'⏱', label:'SCREEN OFF 30 SECONDS',     sub:'Universal RR → Screen Off Timeout → 30s', badge:'SETTING',
-      action: () => scrollToPanel('rr-panel-section', true, 'univ-screen-timeout-section') },
-    { icon:'⏱', label:'SCREEN TIMEOUT PER-APP',    sub:'Per-App → App/Game Config popup',     badge:'SETTING',
-      action: () => scrollToPanel('perapp-rr-section', true) },
     { icon:'🎨', label:'THEME',                  sub:'Header → ⚙ Gear → Theme picker',   badge:'SETTING',
       action: () => _searchOpenTheme() },
     { icon:'🟡', label:'THEME VOLT',             sub:'Yellow-green accent', badge:'THEME',
@@ -6402,7 +6690,10 @@ function initGlobalSearch() {
 
     // Open the parent panel
     const details = section.querySelector('.panel-details');
-    if (open && details && !details.open) details.open = true;
+    if (open && details) {
+      if (!details.open) details.open = true;
+      _applyPanelFocus();
+    }
 
     // If a subpanel ID given, open it too
     // Works for both <details> subpanels and adv-details (conn-bubble) inside panels
@@ -7026,7 +7317,7 @@ async function loadBattSaverPanel() {
     exec(`cat ${BATT_SAVER_SPARE} 2>/dev/null`)
   ]);
   _battSaverEnabled = enabledRaw.trim() === '1';
-  _battSaverSpareSet = new Set(spareRaw.trim().split('\n').filter(Boolean));
+  _battSaverSpareSet = new Set(cleanLines(spareRaw));
   _syncBattSaverToggle();
   renderBattSaverList();
 }
@@ -7135,11 +7426,7 @@ function _buildBattSaverRow(pkg) {
       await exec(`FG=$(cat /dev/.davion_last_fg_pkg 2>/dev/null); [ "$FG" = "${pkg}" ] && settings put global low_power 0 2>/dev/null || true`);
       showToast(`${getAppLabel(pkg)} spared from Battery Saver`, 'BATT SAVER', 'success', '🛡');
     }
-    const pkgs = [..._battSaverSpareSet];
-    const cmds = pkgs.length
-      ? pkgs.map(p => `echo ${JSON.stringify(p)}`).join(' && ')
-      : 'true';
-    await exec(`mkdir -p /sdcard/DAVION_ENGINE && { ${cmds}; } > ${BATT_SAVER_SPARE}`);
+    await exec(lsWrite(BATT_SAVER_SPARE, [..._battSaverSpareSet]));
     renderBattSaverList();
   });
   return row;
@@ -7216,7 +7503,7 @@ async function loadKillOthersPanel() {
     koPkgs.forEach((pkg, i) => {
       if (!_koState[pkg]) _koState[pkg] = { on: false, bl: new Set() };
       _koState[pkg].on = true;
-      _koState[pkg].bl = new Set(blResults[i].trim().split('\n').filter(Boolean));
+      _koState[pkg].bl = new Set(cleanLines(blResults[i]));
     });
   }
 
@@ -7508,8 +7795,7 @@ function _koSpareItem(p, pkg, state, row, renderItems) {
 
     // Persist immediately
     if (state.bl.size > 0) {
-      const args = [...state.bl].map(x => `'${x}'`).join(' ');
-      exec(`mkdir -p ${RR_DIR} && printf '%s\n' ${args} > ${RR_DIR}/${pkg}.killothers_bl`);
+      exec(lsWrite(`${RR_DIR}/${pkg}.killothers_bl`, [...state.bl]));
     } else {
       exec(`rm -f ${RR_DIR}/${pkg}.killothers_bl`);
     }
@@ -7718,8 +8004,7 @@ function _koPopupSpareRow(p) {
 
     // Persist
     if (state.bl.size > 0) {
-      const args = [...state.bl].map(x => `'${x}'`).join(' ');
-      exec(`mkdir -p ${RR_DIR} && printf '%s\n' ${args} > ${RR_DIR}/${_koPopupPkg}.killothers_bl`);
+      exec(lsWrite(`${RR_DIR}/${_koPopupPkg}.killothers_bl`, [...state.bl]));
     } else {
       exec(`rm -f ${RR_DIR}/${_koPopupPkg}.killothers_bl`);
     }
@@ -10437,12 +10722,16 @@ document.addEventListener('DOMContentLoaded', () => {
    CLEAR APP CACHE — Panel 12
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheApps = [];        // currently displayed pool (user or system)
+// Global file that persists which apps are selected for clearing
+// Daemon reads this to know what to clear on launch
+const CACHE_SELECTED_FILE = `/sdcard/DAVION_ENGINE/cache_selected.txt`;
+
+let _cacheApps = [];        // currently displayed pool
 let _cacheUserApps = [];    // user-installed packages
 let _cacheSystemApps = [];  // system packages
 let _cacheSelected = new Set();
 let _cacheLoaded = false;
-let _cachePanelTab = 'user'; // 'user' | 'system'
+let _cachePanelTab = 'user'; // 'user' | 'system' | 'spared'
 
 
 // Load panel when opened + wire tab clicks
@@ -10465,9 +10754,13 @@ async function _loadCacheApps() {
   list.innerHTML = '<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">Loading apps…</div>';
 
   try {
-    // Load user apps first — shows immediately without waiting for system list
-    const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
-    _cacheUserApps = rawUser.trim().split('\n').filter(Boolean);
+    // Load user apps + persisted selection in parallel
+    const [rawUser, rawSelected] = await Promise.all([
+      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000),
+      exec(`cat ${CACHE_SELECTED_FILE} 2>/dev/null`),
+    ]);
+    _cacheUserApps = cleanLines(rawUser);
+    _cacheSelected = new Set(cleanLines(rawSelected));
     _cacheLoaded = true;
 
     const uc = document.getElementById('cache-panel-count-user');
@@ -10476,10 +10769,12 @@ async function _loadCacheApps() {
     _cachePanelTab = 'user';
     _cacheApps = _cacheUserApps;
     _renderCacheList(_cacheApps);
+    _updateClearBtn();
+    _updateSparedCount();
 
-    // Load system apps in background — tab count updates when ready
+    // Load system apps in background
     exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`, 12000).then(rawSystem => {
-      _cacheSystemApps = rawSystem.trim().split('\n').filter(Boolean);
+      _cacheSystemApps = cleanLines(rawSystem);
       const sc = document.getElementById('cache-panel-count-system');
       if (sc) sc.textContent = _cacheSystemApps.length;
     });
@@ -10488,9 +10783,22 @@ async function _loadCacheApps() {
   }
 }
 
+function _updateSparedCount() {
+  const spared = [..._cacheUserApps, ..._cacheSystemApps].filter(p => !_cacheSelected.has(p)).length;
+  const el = document.getElementById('cache-panel-count-spared');
+  // Show count of user apps NOT selected (i.e., spared from clearing)
+  const userSpared = _cacheUserApps.filter(p => !_cacheSelected.has(p)).length;
+  if (el) el.textContent = userSpared;
+}
+
 function _switchCachePanelTab(tab) {
   _cachePanelTab = tab;
-  _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
+  if (tab === 'spared') {
+    // Spared = user apps NOT selected (won't be cleared)
+    _cacheApps = _cacheUserApps.filter(p => !_cacheSelected.has(p));
+  } else {
+    _cacheApps = tab === 'system' ? _cacheSystemApps : _cacheUserApps;
+  }
   document.querySelectorAll('[data-cachetab2]').forEach(b => {
     const active = b.dataset.cachetab2 === tab;
     b.classList.toggle('app-tab--active', active);
@@ -10559,6 +10867,9 @@ function _toggleCacheSelect(pkg, row) {
     chk.innerHTML = checked ? '<span style="color:#000;font-size:11px;">✓</span>' : '';
   }
   _updateClearBtn();
+  _updateSparedCount();
+  // Persist to disk — daemon reads this file on launch trigger
+  exec(lsWrite(CACHE_SELECTED_FILE, [..._cacheSelected]));
 }
 
 function _selectAllCacheApps() {
@@ -10570,6 +10881,8 @@ function _selectAllCacheApps() {
   }
   _renderCacheList(_cacheApps);
   _updateClearBtn();
+  _updateSparedCount();
+  exec(lsWrite(CACHE_SELECTED_FILE, [..._cacheSelected]));
 }
 
 function _updateClearBtn() {
@@ -10590,26 +10903,24 @@ async function _clearSelectedCache() {
   const status = document.getElementById('cache-clear-status');
   const btn = document.getElementById('btn-clear-cache');
 
-  status.style.display = 'block';
-  status.style.color = 'var(--a)';
-  status.textContent = `⚙ Clearing ${_cacheSelected.size} app(s)…`;
+  if (status) { status.style.display = 'block'; status.style.color = 'var(--a)'; status.textContent = `⚙ Clearing ${_cacheSelected.size} app(s)…`; }
   if (btn) btn.disabled = true;
 
-  let cleared = 0;
-  let failed = 0;
+  let cleared = 0, failed = 0;
 
   for (const pkg of _cacheSelected) {
-    const result = await exec(`pm clear --cache-only ${pkg} 2>/dev/null || rm -rf /data/data/${pkg}/cache 2>/dev/null && echo OK`);
-    if (result.includes('Success') || result.includes('OK')) {
-      cleared++;
-    } else {
-      failed++;
-    }
+    // rm cache contents across all paths — same as daemon
+    const res = await exec(
+      `for d in /data/user/0/${pkg}/cache /data/user_de/0/${pkg}/cache /data/data/${pkg}/cache; do` +
+      `  [ -d "$d" ] && rm -rf "$d/"* 2>/dev/null; done; echo OK`
+    );
+    if (res.includes('OK')) cleared++; else failed++;
   }
 
-  status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
-  status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
-
+  if (status) {
+    status.style.color = failed === 0 ? 'var(--a)' : '#f59e0b';
+    status.textContent = `✔ Cleared ${cleared} app(s)${failed > 0 ? ` · Failed: ${failed}` : ''}`;
+  }
   if (cleared > 0) {
     showToast(
       `${cleared} app cache${cleared !== 1 ? 's' : ''} cleared${failed > 0 ? ` · ${failed} failed` : ''}`,
@@ -10627,17 +10938,17 @@ async function _clearSelectedCache() {
 
 /* ═══════════════════════════════════════════════════════════
    CACHE CLEAR ON LAUNCH — Per-app popup
-   File: RR_DIR/pkg.cacheclear (flag)
-   File: RR_DIR/pkg.cacheclear_list (newline-separated pkgs)
+   NEW LOGIC: clear ALL user app caches on launch, except spared list.
+   File: RR_DIR/pkg.cacheclear        (flag — enabled/disabled)
+   File: RR_DIR/pkg.cacheclear_list   (spare list — apps to SKIP)
    ═══════════════════════════════════════════════════════════ */
 
-let _cacheClearPkg       = '';
-let _cacheClearOn        = false;
-let _cacheClearList      = new Set();
-let _cacheClearAllPkgs   = [];   // user packages
-let _cacheClearSysPkgs   = [];   // system packages
-let _cacheClearTab       = 'all';
-let _cacheClearQuery     = '';
+let _cacheClearPkg     = '';
+let _cacheClearOn      = false;
+let _cacheSpareList    = new Set();   // apps to SPARE (skip) from clearing
+let _cacheClearAllPkgs = [];          // user packages (system excluded)
+let _cacheClearTab     = 'all';
+let _cacheClearQuery   = '';
 
 async function _openCacheClearPopup(pkg) {
   _cacheClearPkg = pkg;
@@ -10647,15 +10958,16 @@ async function _openCacheClearPopup(pkg) {
 
   if (pkgEl) pkgEl.textContent = pkg;
 
-  // Load state from disk
+  // Load enabled flag
   const flagRaw = await exec(`[ -f ${RR_DIR}/${pkg}.cacheclear ] && echo 1 || echo 0`);
   _cacheClearOn = flagRaw.trim() === '1';
 
+  // Load spare list (apps to SKIP — not clear)
   const listRaw = await exec(`cat ${RR_DIR}/${pkg}.cacheclear_list 2>/dev/null`);
-  _cacheClearList = new Set(listRaw.trim().split('\n').filter(Boolean));
+  _cacheSpareList = new Set(cleanLines(listRaw));
 
   // Sync toggle
-  const tog = document.getElementById('cache-popup-toggle');
+  const tog      = document.getElementById('cache-popup-toggle');
   const togLabel = document.getElementById('cache-popup-toggle-label');
   if (tog) {
     tog.setAttribute('aria-pressed', String(_cacheClearOn));
@@ -10663,20 +10975,13 @@ async function _openCacheClearPopup(pkg) {
     if (togLabel) togLabel.textContent = _cacheClearOn ? 'ON' : 'OFF';
   }
 
-  // Load app list (user + system)
-  if (!_cacheClearAllPkgs.length) {
-    const [rawUser, rawSys] = await Promise.all([
-      exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`),
-      exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`),
-    ]);
-    _cacheClearAllPkgs = rawUser.trim().split('\n').filter(p => p && p !== pkg);
-    _cacheClearSysPkgs = rawSys.trim().split('\n').filter(p => p && p !== pkg);
-  }
+  // Load user app list fresh each time (system packages excluded).
+  // Do NOT filter out pkg here — filter at render time so switching apps always shows correct list.
+  const rawUser = await exec(`pm list packages -3 2>/dev/null | cut -d: -f2 | sort`, 8000);
+  _cacheClearAllPkgs = cleanLines(rawUser);
 
-  _cacheClearTab = 'all';
+  _cacheClearTab   = 'all';
   _cacheClearQuery = '';
-  // Reset system pkg cache on reopen (pkg may have changed)
-  _cacheClearSysPkgs = [];
   _renderCachePopupList();
   _updateCachePopupCount();
 
@@ -10701,7 +11006,7 @@ async function _openCacheClearPopup(pkg) {
     };
   }
 
-  // Wire tabs (selected / all / system)
+  // Wire tabs (spared / all)
   document.querySelectorAll('[data-cachetab]').forEach(btn => {
     btn.onclick = () => {
       _cacheClearTab = btn.dataset.cachetab;
@@ -10709,15 +11014,6 @@ async function _openCacheClearPopup(pkg) {
         b.classList.toggle('app-tab--active', b.dataset.cachetab === _cacheClearTab);
         b.setAttribute('aria-selected', String(b.dataset.cachetab === _cacheClearTab));
       });
-      // Load system pkgs on first switch to system tab
-      if (_cacheClearTab === 'system' && !_cacheClearSysPkgs.length) {
-        exec(`pm list packages -s 2>/dev/null | cut -d: -f2 | sort`).then(raw => {
-          _cacheClearSysPkgs = raw.trim().split('\n').filter(p => p && p !== _cacheClearPkg);
-          _updateCachePopupCount();
-          _renderCachePopupList();
-        });
-        return;
-      }
       _renderCachePopupList();
     };
   });
@@ -10747,12 +11043,15 @@ async function _openCacheClearPopup(pkg) {
 function _closeCacheClearPopup() {
   const overlay = document.getElementById('cache-clear-popup');
   if (overlay) overlay.style.display = 'none';
-  const count = _cacheClearList.size;
+  const spared  = _cacheSpareList.size;
   const appName = typeof getAppLabel === 'function' ? getAppLabel(_cacheClearPkg) : _cacheClearPkg;
-  if (count > 0) {
-    showToast(`${count} app${count !== 1 ? 's' : ''} will be cleared on launch`, appName.toUpperCase(), 'success', '🗑');
+  if (_cacheClearOn) {
+    const msg = spared > 0
+      ? `Cache cleared on launch • ${spared} app${spared !== 1 ? 's' : ''} spared`
+      : 'Cache cleared on launch • all user apps';
+    showToast(msg, appName.toUpperCase(), 'success', '🗑');
   } else {
-    showToast('No apps selected for cache clear', appName.toUpperCase(), 'info', '🗑');
+    showToast('Cache clear on launch disabled', appName.toUpperCase(), 'info', '🗑');
   }
 }
 
@@ -10760,11 +11059,12 @@ function _renderCachePopupList() {
   const list = document.getElementById('cache-popup-list');
   if (!list) return;
 
-  let pool = _cacheClearTab === 'selected'
-    ? [..._cacheClearAllPkgs, ..._cacheClearSysPkgs].filter(p => _cacheClearList.has(p))
-    : _cacheClearTab === 'system'
-      ? _cacheClearSysPkgs
-      : _cacheClearAllPkgs;
+  // spared tab: show only spared apps; all tab: show all user apps
+  // Always exclude the launching app itself — it's permanently spared
+  let pool = (_cacheClearTab === 'spared'
+    ? _cacheClearAllPkgs.filter(p => _cacheSpareList.has(p))
+    : _cacheClearAllPkgs
+  ).filter(p => p && p !== _cacheClearPkg);
 
   if (_cacheClearQuery) {
     const q = _cacheClearQuery.toLowerCase();
@@ -10775,68 +11075,70 @@ function _renderCachePopupList() {
   _updateCachePopupCount();
 
   if (!pool.length) {
-    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">No apps</div>`;
+    list.innerHTML = `<div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">${
+      _cacheClearTab === 'spared' ? 'No apps spared' : 'No apps'
+    }</div>`;
     return;
   }
 
-  list.innerHTML = pool.map(pkg => {
-    const label = typeof getAppLabel === 'function' ? getAppLabel(pkg) : pkg;
-    const sel = _cacheClearList.has(pkg);
+  list.innerHTML = pool.map(p => {
+    const label  = typeof getAppLabel === 'function' ? getAppLabel(p) : p;
+    const spared = _cacheSpareList.has(p);
+    // Spared = shield icon + highlighted; not spared = will be cleared (checkmark style)
     return `
-      <div class="list-item" data-pkg="${pkg}" onclick="_toggleCacheClearApp('${pkg}')">
+      <div class="list-item" data-pkg="${p}" onclick="_toggleCacheSpareApp('${p}')">
         <div class="item-row">
-          <div class="app-icon-wrap" data-pkg="${pkg}">
+          <div class="app-icon-wrap" data-pkg="${p}">
             <img class="app-icon" alt="${label.toUpperCase()}">
           </div>
           <div class="item-info">
             <span class="item-title">${label.toUpperCase()}</span>
-            <span class="item-desc mono">${pkg}</span>
+            <span class="item-desc mono">${p}</span>
           </div>
         </div>
         <div class="btn-row">
-          <div id="cachepop-chk-${pkg.replace(/\./g,'_')}"
+          <div id="cachepop-chk-${p.replace(/\./g,'_')}"
             style="width:20px;height:20px;border:0.8px solid var(--bdr);border-radius:5px;flex-shrink:0;
-            background:${sel ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
-            ${sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : ''}
+            background:${spared ? 'var(--a)' : 'transparent'};display:flex;align-items:center;justify-content:center;transition:background 0.15s;">
+            ${spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : ''}
           </div>
         </div>
       </div>`;
   }).join('');
 
-  // Load icons using same pattern as other panels
   if (typeof loadVisibleIcons === 'function') loadVisibleIcons('cache-popup-list');
 }
 
-async function _toggleCacheClearApp(pkg) {
-  if (_cacheClearList.has(pkg)) {
-    _cacheClearList.delete(pkg);
+async function _toggleCacheSpareApp(pkg) {
+  if (_cacheSpareList.has(pkg)) {
+    _cacheSpareList.delete(pkg);
   } else {
-    _cacheClearList.add(pkg);
+    _cacheSpareList.add(pkg);
   }
 
-  // Save list to disk
-  const listStr = [..._cacheClearList].join('\n');
-  await exec(`mkdir -p ${RR_DIR} && printf '%s' '${listStr}' > ${RR_DIR}/${_cacheClearPkg}.cacheclear_list`);
+  // Save spare list to disk — shell reads this to skip these apps
+  await exec(lsWrite(`${RR_DIR}/${_cacheClearPkg}.cacheclear_list`, [..._cacheSpareList]));
 
   // Update checkbox
   const safeId = 'cachepop-chk-' + pkg.replace(/\./g, '_');
-  const chk = document.getElementById(safeId);
-  const sel = _cacheClearList.has(pkg);
+  const chk    = document.getElementById(safeId);
+  const spared = _cacheSpareList.has(pkg);
   if (chk) {
-    chk.style.background = sel ? 'var(--a)' : 'transparent';
-    chk.innerHTML = sel ? '<span style="color:#000;font-size:12px;font-weight:700;">✓</span>' : '';
+    chk.style.background = spared ? 'var(--a)' : 'transparent';
+    chk.innerHTML = spared ? '<span style="color:#000;font-size:12px;font-weight:700;">🛡</span>' : '';
   }
   _updateCachePopupCount();
 }
 
 function _updateCachePopupCount() {
-  const count = _cacheClearList.size;
-  const selTab = document.getElementById('cache-popup-count-selected');
-  const allTab = document.getElementById('cache-popup-count-all');
-  const sysTab = document.getElementById('cache-popup-count-system');
-  const main   = document.getElementById('cache-popup-count');
-  if (selTab) selTab.textContent = count;
-  if (allTab) allTab.textContent = _cacheClearAllPkgs.length;
-  if (sysTab) sysTab.textContent = _cacheClearSysPkgs.length;
-  if (main)   main.textContent   = `${count} app${count !== 1 ? 's' : ''} selected`;
+  const spared  = _cacheSpareList.size;
+  const total   = _cacheClearAllPkgs.filter(p => p !== _cacheClearPkg).length;
+  const sprdTab = document.getElementById('cache-popup-count-spared');
+  const allTab  = document.getElementById('cache-popup-count-all');
+  const main    = document.getElementById('cache-popup-count');
+  if (sprdTab) sprdTab.textContent = spared;
+  if (allTab)  allTab.textContent  = total;
+  if (main)    main.textContent    = spared > 0
+    ? `${spared} app${spared !== 1 ? 's' : ''} spared`
+    : 'all user apps will be cleared';
 }

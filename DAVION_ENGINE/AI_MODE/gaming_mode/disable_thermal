@@ -188,7 +188,7 @@ if [ "$BOOSTER_MODE" -eq 1 ]; then
 fi
 
 if [ -f /proc/driver/thermal/tzcpu ]; then
-	t_limit="125" # Celcius unit
+	t_limit="110" # Celcius unit
 	no_cooler="0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler"
 	lock_val "1 ${t_limit}000 0 mtktscpu-sysrst $no_cooler 200" /proc/driver/thermal/tzcpu
 	lock_val "1 ${t_limit}000 0 mtktspmic-sysrst $no_cooler 1000" /proc/driver/thermal/tzpmic
@@ -203,7 +203,7 @@ if [ -f /proc/driver/thermal/tzcpu ]; then
 fi
 
 for zone in /sys/class/thermal/thermal_zone*; do
-	lock_val "disabled" $zone/mode
+	# lock_val "disabled" $zone/mode
 done
 
 if [ -f /sys/devices/virtual/thermal/thermal_message/cpu_limits ]; then
@@ -372,7 +372,7 @@ ultra_limit_set() {
     echo 'Proceeding in 5 seconds...' 1>&2
     sleep 5
     echo '🔥 DISABLING THERMAL LIMITS 🔥' 1>&2
-    t_limit="125"
+    t_limit="110"
     no_cooler="0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler 0 0 no-cooler"
     lock_val "1 ${t_limit}000 0 mtktscpu-sysrst $no_cooler 200" /proc/driver/thermal/tzcpu
     lock_val "1 ${t_limit}000 0 mtktspmic-sysrst $no_cooler 1000" /proc/driver/thermal/tzpmic

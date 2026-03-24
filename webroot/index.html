@@ -70,6 +70,14 @@
                   <span class="fab-menu-icon" id="fab-toast-icon">🔔</span>
                   <span class="fab-menu-label mono" id="fab-toast-label">TOAST ON</span>
                 </button>
+                <button class="fab-menu-item" id="fab-menu-ko" aria-pressed="true">
+                  <span class="fab-menu-icon" id="fab-ko-icon">⏹</span>
+                  <span class="fab-menu-label mono" id="fab-ko-label">KILL OTHERS ON</span>
+                </button>
+                <button class="fab-menu-item" id="fab-menu-cache" aria-pressed="true">
+                  <span class="fab-menu-icon" id="fab-cache-icon">🗑</span>
+                  <span class="fab-menu-label mono" id="fab-cache-label">CLEAR CACHE ON</span>
+                </button>
                 <div class="fab-menu-divider"></div>
                 <button class="fab-menu-item fab-menu-exit" id="fab-menu-exit">
                   <span class="fab-menu-icon">
@@ -285,6 +293,13 @@
           </div>
         </div>
         <div class="hdi-divider"></div>
+        <div class="hdi-tile" id="hdi-tile-temp">
+          <div class="hdi-body">
+            <span class="hdi-label glow-label">TEMP</span>
+            <span class="hdi-val" id="hsi-temp">—</span>
+          </div>
+        </div>
+        <div class="hdi-divider"></div>
         <div class="hdi-tile" id="hdi-tile-disp">
           <div class="hdi-body">
             <span class="hdi-label glow-label">DISPLAY</span>
@@ -305,13 +320,27 @@
             <span class="hdi-val" id="hsi-ctrl">—</span>
           </div>
         </div>
+        <div class="hdi-divider"></div>
+        <div class="hdi-tile">
+          <div class="hdi-body">
+            <span class="hdi-label glow-label">I/O</span>
+            <span class="hdi-val" id="hsi-io">—</span>
+          </div>
+        </div>
+        <div class="hdi-divider"></div>
+        <div class="hdi-tile">
+          <div class="hdi-body">
+            <span class="hdi-label glow-label">FREQ LIM</span>
+            <span class="hdi-val" id="hsi-freqlim">—</span>
+          </div>
+        </div>
       </div>
     </header>
 
     <!-- Status ticker -->
     <div class="status-bar" id="main-status-bar">
       <span class="status-bracket">[</span>
-      <span id="debug-msg" class="status-text mono">SYS READY · MODULE ONLINE</span>
+      <span id="debug-msg" class="status-text mono"><span class="status-text-inner" id="debug-msg-inner">SYS READY · MODULE ONLINE</span></span>
       <span class="status-bracket">]</span>
     </div>
 
@@ -322,8 +351,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🎮</div>
-          <div class="panel-title">GAME LIST · GAME CONFIGURATION</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">GAME LIST · GAME CONFIGURATION</div>
+            <div class="panel-subtitle">Per-app gaming tweaks & profiles</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -343,8 +375,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">⚡</div>
-        <div class="panel-title">CPU · GOVERNOR &amp; FREQUENCY</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">CPU · GOVERNOR &amp; FREQUENCY</div>
+          <div class="panel-subtitle">Governor, profiles &amp; freq scale</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -469,8 +504,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🖥️</div>
-        <div class="panel-title">GPU · FREQUENCY CONTROL</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">GPU · FREQUENCY CONTROL</div>
+          <div class="panel-subtitle">OPP lock &amp; frequency history</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div style="padding:12px 14px 16px;">
@@ -514,6 +552,24 @@
           <button id="btn-unlock-gpu" class="nexus-btn" style="flex-shrink:0;padding:7px 14px;opacity:0.7;">UNLOCK</button>
         </div>
 
+        <!-- OPP Table -->
+        <details style="margin-top:14px;">
+          <summary style="display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:4px 0;" class="mono">
+            <span style="font-size:9px;letter-spacing:0.16em;color:var(--dim);flex:1;">OPP TABLE — TAP TO SELECT</span>
+            <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          </summary>
+          <div id="gpu-opp-table" style="display:flex;flex-direction:column;gap:3px;max-height:180px;overflow-y:auto;margin-top:8px;"></div>
+        </details>
+
+        <!-- Frequency History Graph -->
+        <div style="margin-top:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span class="mono" style="font-size:9px;letter-spacing:0.16em;color:var(--dim);">FREQ HISTORY · 30s</span>
+            <span class="mono" id="gpu-graph-peak" style="font-size:9px;color:var(--dim);"></span>
+          </div>
+          <canvas id="gpu-freq-graph" height="52" style="width:100%;border-radius:6px;background:rgba(var(--a-rgb),0.04);border:0.5px solid rgba(var(--a-rgb),0.12);display:block;"></canvas>
+        </div>
+
       </div>
       </details>
     </section>
@@ -523,8 +579,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🔋</div>
-        <div class="panel-title">BATTERY SECTION · SAVES BATTERY</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">BATTERY SECTION · SAVES BATTERY</div>
+          <div class="panel-subtitle">Idle 60Hz, deep sleep &amp; saver</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div class="panel-body">
@@ -638,14 +697,17 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🔒</div>
-        <div class="panel-title">UNIVERSAL RR/BRIGHTNESS/VOLUME</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">UNIVERSAL RR/BRIGHTNESS/VOLUME</div>
+          <div class="panel-subtitle">Global display &amp; audio controls</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
       <!-- Universal RR Lock -->
       <details class="adv-details rr-details">
-      <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+      <summary class="adv-summary mono">
         <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           UNIVERSAL REFRESH RATE LOCK
@@ -667,7 +729,7 @@
 
         <!-- ── Nested subpanel: 60Hz Drop ── -->
         <details class="adv-details rr-details" style="margin-top:8px;">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+        <summary class="adv-summary mono">
           <span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
             <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
             AUTO 60HZ DROP
@@ -787,7 +849,7 @@
 
       <!-- Headset Configuration Subpanel -->
       <details class="adv-details rr-details" id="headset-config-section">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;gap:8px;">
+        <summary class="adv-summary mono">
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
           HEADSET CONFIGURATION
           <span id="headset-status-badge" class="mono" style="font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--dim);margin-left:auto;">DETECTING…</span>
@@ -872,45 +934,17 @@
       </details>
 
       <!-- ── SUB-PANEL: Universal Screen Off Timeout ── -->
-      <details class="adv-details rr-details" id="univ-screen-timeout-section">
-        <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
-          <span style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-            <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-            SCREEN OFF TIMEOUT
-          </span>
-          <span id="univ-screentimeout-active" class="mono" style="font-size:9px;padding:2px 8px;border-radius:8px;background:rgba(var(--a-rgb),0.08);border:1px solid rgba(var(--a-rgb),0.22);color:var(--a);flex-shrink:0;margin-left:8px;">—</span>
-        </summary>
-        <div class="rr-universal-block" style="padding-top:6px;">
-          <div class="mono" style="font-size:9px;color:var(--dim);margin-bottom:10px;line-height:1.5;">
-            Sets the global Android screen off timeout · Same as Settings → Display → Screen Timeout
-          </div>
-          <!-- Timeout chips -->
-          <div class="univ-screentimeout-chips" id="univ-screentimeout-chips">
-            <button class="screentimeout-chip" data-ms="30000"  data-label="30 sec">30 SEC</button>
-            <button class="screentimeout-chip" data-ms="60000"  data-label="1 min">1 MIN</button>
-            <button class="screentimeout-chip" data-ms="120000" data-label="2 min">2 MIN</button>
-            <button class="screentimeout-chip" data-ms="300000" data-label="5 min">5 MIN</button>
-            <button class="screentimeout-chip" data-ms="600000" data-label="10 min">10 MIN</button>
-            <button class="screentimeout-chip" data-ms="1200000" data-label="20 min">20 MIN</button>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px;">
-            <button id="btn-screentimeout-apply" class="nexus-btn nexus-btn--full" disabled>⏱ SELECT A DURATION ›</button>
-            <button id="btn-screentimeout-reset" class="nexus-btn" style="flex-shrink:0;opacity:0.6;font-size:10px;padding:5px 10px;">RESET</button>
-          </div>
-          <div class="mono" style="font-size:9px;color:var(--dim);margin-top:6px;opacity:0.6;">
-            Reset restores system default (30s). Per-app timeout overrides this when an app is in foreground.
-          </div>
-        </div>
-      </details>
-
       </details>
     </section>
     <section class="nexus-panel" id="perapp-rr-section" data-pnum="06">
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">📱</div>
-        <div class="panel-title">PER-APP RR/BRIGHTNESS/VOLUME</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">PER-APP RR/BRIGHTNESS/VOLUME</div>
+          <div class="panel-subtitle">Per-app display overrides</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
       <div class="rr-perapp-block" style="padding:0 14px 16px;">
@@ -947,8 +981,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">🎨</div>
-        <div class="panel-title">BOOST COLOR · SATURATION</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">BOOST COLOR · SATURATION</div>
+          <div class="panel-subtitle">Saturation &amp; color boost</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -1003,8 +1040,11 @@
       <details class="panel-details">
       <summary class="panel-header panel-summary">
         <div class="panel-tag panel-icon">✨</div>
-        <div class="panel-title">ANIMATION SCALE</div>
-        <div class="panel-line"></div>
+        <div class="panel-title-wrap">
+          <div class="panel-title">ANIMATION SCALE</div>
+          <div class="panel-subtitle">Window &amp; transition speed</div>
+        </div>
+        <span class="panel-status-dot" aria-hidden="true"></span>
         <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
       </summary>
 
@@ -1012,7 +1052,7 @@
 
         <!-- Window Animation Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               WINDOW ANIMATION SCALE
@@ -1032,7 +1072,7 @@
 
         <!-- Transition Animation Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               TRANSITION ANIMATION SCALE
@@ -1052,7 +1092,7 @@
 
         <!-- Animator Duration Scale -->
         <details class="adv-details rr-details">
-          <summary class="adv-summary mono" style="display:flex;align-items:center;justify-content:space-between;">
+          <summary class="adv-summary mono">
             <span style="display:flex;align-items:center;gap:8px;flex:1;">
               <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
               ANIMATOR DURATION SCALE
@@ -1107,12 +1147,15 @@
     <!-- ══════════════════════════════════════════════════
          PANEL 06 · KILL OTHERS · LAUNCH MANAGER
          ══════════════════════════════════════════════════ -->
-    <section class="nexus-panel" id="kill-others-section" data-pnum="09">
+    <section class="nexus-panel" id="kill-others-section" data-pnum="09" style="display:none;" data-hidden-by-toggle="1">
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🚀</div>
-          <div class="panel-title">KILL OTHERS · LAUNCH MANAGER</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">KILL OTHERS · LAUNCH MANAGER</div>
+            <div class="panel-subtitle">Force-stop apps on game launch</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -1150,8 +1193,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">📡</div>
-          <div class="panel-title">CONNECTION ON LAUNCH</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">CONNECTION ON LAUNCH</div>
+            <div class="panel-subtitle">WiFi &amp; data on app open</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body">
@@ -1246,8 +1292,11 @@
       <details class="panel-details">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">⚡</div>
-          <div class="panel-title">FEATURES · FPS STABILITY</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">FEATURES · FPS STABILITY</div>
+            <div class="panel-subtitle">FPS stability &amp; system tweaks</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
         <div class="panel-body" style="padding:12px 14px 16px;display:flex;flex-direction:column;gap:10px;">
@@ -1260,7 +1309,7 @@
 
           <!-- ── TOGGLE 1: FRAME STABILITY ────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-frame-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🎯</span>
                 <div style="min-width:0;">
@@ -1305,7 +1354,7 @@
 
           <!-- ── TOGGLE 2: ANTI-THROTTLE BOOST ──────────────────── -->
           <details class="adv-details conn-bubble" id="feat-throttle-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🔥</span>
                 <div style="min-width:0;">
@@ -1352,7 +1401,7 @@
 
           <!-- ── TOGGLE 3: PYROX THERMAL ────────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-pyrox-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">🔥</span>
                 <div style="min-width:0;">
@@ -1389,7 +1438,7 @@
 
           <!-- ── TOGGLE 5: COOL MODE ───────────────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-cool-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">❄️</span>
                 <div style="min-width:0;">
@@ -1429,7 +1478,7 @@
 
           <!-- ── TOGGLE 4: CPU VOLTS OPTIMIZER ──────────────────────── -->
           <details class="adv-details conn-bubble" id="feat-cpuvolt-sub" style="flex-direction:column;align-items:stretch;padding:0;">
-            <summary class="adv-summary" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;list-style:none;-webkit-tap-highlight-color:transparent;">
+            <summary class="adv-summary">
               <div style="display:flex;align-items:center;gap:10px;min-width:0;">
                 <span style="font-size:18px;flex-shrink:0;">⚡</span>
                 <div style="min-width:0;">
@@ -1465,8 +1514,11 @@
       <details class="panel-details" id="clear-cache-panel">
         <summary class="panel-header panel-summary">
           <div class="panel-tag panel-icon">🗑</div>
-          <div class="panel-title">CLEAR APP CACHE</div>
-          <div class="panel-line"></div>
+          <div class="panel-title-wrap">
+            <div class="panel-title">CLEAR APP CACHE</div>
+            <div class="panel-subtitle">Auto-clear cache on app launch</div>
+          </div>
+          <span class="panel-status-dot" aria-hidden="true"></span>
           <span class="adv-arrow-btn" aria-hidden="true"><svg class="adv-arrow-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/><polyline points="7,8 10,12 13,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </summary>
 
@@ -1483,6 +1535,10 @@
 
           <!-- Tabs -->
           <div class="app-tab-bar" role="tablist" style="margin-bottom:2px;">
+            <button class="app-tab" id="cache-panel-tab-spared" data-cachetab2="spared" role="tab" aria-selected="false">
+              <span class="mono">🛡 SPARED</span>
+              <span class="app-tab-count mono" id="cache-panel-count-spared">0</span>
+            </button>
             <button class="app-tab app-tab--active" id="cache-panel-tab-user" data-cachetab2="user" role="tab" aria-selected="true">
               <span class="mono">📱 USER</span>
               <span class="app-tab-count mono" id="cache-panel-count-user">—</span>
@@ -1506,7 +1562,7 @@
           <div id="cache-clear-status" class="mono" style="font-size:9px;color:var(--dim);display:none;padding:6px 10px;background:rgba(var(--a-rgb),0.06);border-radius:6px;"></div>
 
           <!-- App list -->
-          <div id="cache-app-list" style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto;">
+          <div id="cache-app-list" style="display:flex;flex-direction:column;gap:4px;">
             <div class="mono" style="font-size:10px;color:var(--dim);text-align:center;padding:16px;">
               Loading apps…
             </div>
@@ -1624,26 +1680,6 @@
       </details>
 
       <!-- Per-App Screen Off Timeout -->
-      <details class="popup-block popup-collapsible" id="popup-screentimeout-block">
-        <summary class="popup-collapsible-summary">
-          <span class="mono popup-block-label">SCREEN OFF TIMEOUT</span>
-          <span class="popup-block-val" id="popup-screentimeout-val">DEFAULT</span>
-          <span class="popup-collapse-arrow">▾</span>
-        </summary>
-        <div class="popup-collapsible-body">
-          <div class="mono" style="font-size:8.5px;color:var(--dim);margin-bottom:8px;">Override screen timeout for this app only</div>
-          <div class="univ-screentimeout-chips" id="popup-screentimeout-chips">
-            <button class="screentimeout-chip" data-ms="30000"   data-label="30 sec">30 SEC</button>
-            <button class="screentimeout-chip" data-ms="60000"   data-label="1 min">1 MIN</button>
-            <button class="screentimeout-chip" data-ms="120000"  data-label="2 min">2 MIN</button>
-            <button class="screentimeout-chip" data-ms="300000"  data-label="5 min">5 MIN</button>
-            <button class="screentimeout-chip" data-ms="600000"  data-label="10 min">10 MIN</button>
-            <button class="screentimeout-chip" data-ms="1200000" data-label="20 min">20 MIN</button>
-            <button class="screentimeout-chip" data-ms="0"       data-label="Default">DEFAULT</button>
-          </div>
-        </div>
-      </details>
-
       <!-- Per-App Saturation Boost -->
       <details class="popup-block popup-sat-block popup-collapsible">
         <summary class="popup-collapsible-summary">
@@ -1768,7 +1804,7 @@
         <div class="popup-encore-row">
           <div class="popup-encore-info">
             <span class="mono popup-block-label">🗑 CLEAR CACHE ON LAUNCH</span>
-            <span class="popup-encore-sub mono">Auto-clear selected apps cache when this app launches</span>
+            <span class="popup-encore-sub mono">Triggers CLEAR SELECTED in Cache Manager on launch</span>
           </div>
           <button id="popup-cache-btn" class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" aria-pressed="false">
             <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
@@ -1799,8 +1835,8 @@
       <!-- Toggle -->
       <div class="popup-block" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;margin-bottom:6px;">
         <div>
-          <div class="mono" style="font-size:10px;color:#f87171;letter-spacing:0.05em;">CLEAR CACHE ON LAUNCH</div>
-          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">0 apps selected</div>
+          <div class="mono" style="font-size:10px;color:#f87171;letter-spacing:0.05em;">CLEAR ALL USER APP CACHES ON LAUNCH</div>
+          <div class="mono" id="cache-popup-count" style="font-size:9px;opacity:0.5;margin-top:2px;">0 apps spared</div>
         </div>
         <button class="gaming-toggle-btn popup-toggle-btn popup-toggle-btn--danger" id="cache-popup-toggle" aria-pressed="false">
           <span class="popup-toggle-track"><span class="popup-toggle-thumb"></span></span>
@@ -1816,19 +1852,15 @@
         <button id="cache-popup-search-clear" class="search-clear" aria-label="Clear" hidden>✕</button>
       </div>
 
-      <!-- Tabs -->
+      <!-- Tabs: Spared + All user apps only (system tab removed) -->
       <div class="app-tab-bar" role="tablist" style="margin-bottom:6px;">
-        <button class="app-tab" id="cache-popup-tab-selected" data-cachetab="selected" role="tab" aria-selected="false">
-          <span class="mono">🗑 SELECTED</span>
-          <span class="app-tab-count mono" id="cache-popup-count-selected">0</span>
+        <button class="app-tab" id="cache-popup-tab-spared" data-cachetab="spared" role="tab" aria-selected="false">
+          <span class="mono">🛡 SPARED</span>
+          <span class="app-tab-count mono" id="cache-popup-count-spared">0</span>
         </button>
         <button class="app-tab app-tab--active" id="cache-popup-tab-all" data-cachetab="all" role="tab" aria-selected="true">
           <span class="mono">USER</span>
           <span class="app-tab-count mono" id="cache-popup-count-all">—</span>
-        </button>
-        <button class="app-tab" id="cache-popup-tab-system" data-cachetab="system" role="tab" aria-selected="false">
-          <span class="mono">SYSTEM</span>
-          <span class="app-tab-count mono" id="cache-popup-count-system">—</span>
         </button>
       </div>
 
