@@ -301,6 +301,8 @@ get_global_enforce_lite() {
 apply_per_app_rr() {
     local pkg="$1"
     local mode_file="$RR_DIR/$pkg.mode"
+    # Skip if idle60_daemon intentionally dropped to 60Hz
+    [ -f "/dev/.davion_idle60_dropped" ] && return 0
     if [ -f "$mode_file" ]; then
         local mode_id
         mode_id=$(tr -d '[:space:]' < "$mode_file")
