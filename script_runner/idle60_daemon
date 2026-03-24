@@ -42,10 +42,8 @@ is_spared() {
     [ -f "$RR_LOCK_DIR/${1}.spare" ] && return 0
     # Legacy: per-app/game spare list (idle60 panel list)
     [ -f "$SPARE_FILE" ] && grep -Fxq "$1" "$SPARE_FILE" 2>/dev/null && return 0
-    # Universal spare: only applies to apps that HAVE a per-app RR lock
-    if [ -f "$UNIVERSAL_SPARE_FILE" ] && [ -f "$RR_LOCK_DIR/${1}.mode" ]; then
-        return 0
-    fi
+    # Universal spare: spare apps that have NO per-app RR lock (they use universal RR)
+    [ -f "$UNIVERSAL_SPARE_FILE" ] && [ ! -f "$RR_LOCK_DIR/${1}.mode" ] && return 0
     return 1
 }
 now_ts()         { date +%s; }
