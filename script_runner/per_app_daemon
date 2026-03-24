@@ -147,24 +147,29 @@ apply_per_app_settings() {
     
     # ─────── VOLUME ─────────────────────────────────────────────────────────
     local vol=""
+    local vol_source=""
+    
+    # PRIORITY: Per-app volume ALWAYS takes precedence
     if vol=$(get_app_volume "$pkg"); then
-        # Per-app volume found
-        if [ "$vol" != "$LAST_APPLIED_VOL" ]; then
-            if apply_volume "$vol"; then
-                log_msg "📢 Volume applied: $vol (per-app) ← $pkg"
-                LAST_APPLIED_VOL="$vol"
+        vol_source="per-app"
+    elif vol=$(get_universal_volume); then
+        vol_source="universal"
+    fi
+    
+    # Only apply if volume actually changed
+    if [ -n "$vol" ] && [ "$vol" != "$LAST_APPLIED_VOL" ]; then
+        if apply_volume "$vol"; then
+            log_msg "📢 Volume applied: $vol ($vol_source) ← $pkg"
+            LAST_APPLIED_VOL="$vol"
+            # Mark that we applied per-app volume (for WebUI to check)
+            if [ "$vol_source" = "per-app" ]; then
+                touch "$RR_DIR/.vol_per_app_active" 2>/dev/null
             fi
         fi
-    else
-        # No per-app volume, try universal
-        if vol=$(get_universal_volume); then
-            if [ "$vol" != "$LAST_APPLIED_VOL" ]; then
-                if apply_volume "$vol"; then
-                    log_msg "📢 Volume applied: $vol (universal) ← $pkg"
-                    LAST_APPLIED_VOL="$vol"
-                fi
-            fi
-        fi
+    elif [ -z "$vol" ] && [ -n "$LAST_APPLIED_VOL" ]; then
+        # No volume config for this app, clear the state
+        LAST_APPLIED_VOL=""
+        rm -f "$RR_DIR/.vol_per_app_active" 2>/dev/null
     fi
     
     # ─────── REFRESH RATE ───────────────────────────────────────────────────
@@ -213,6 +218,22 @@ apply_per_app_settings() {
             LAST_APPLIED_SPARE=""
         fi
     fi
+    
+    # ─────── SAFETY CHECK: Re-apply per-app volume if it exists ───────────────
+    # This prevents any other process from overriding per-app volume
+    if [ -f "$RR_DIR/${pkg}.vol" ]; then
+        local safety_vol=$(tr -d '[:space:]' < "$RR_DIR/${pkg}.vol" 2>/dev/null)
+        if [ -n "$safety_vol" ] && [ "$safety_vol" -ge 0 ] 2>/dev/null && [ "$safety_vol" -le 100 ] 2>/dev/null; then
+            # Get current system volume
+            local current_vol=$(cmd media_session volume --stream 3 --get 2>/dev/null | grep -oE "[0-9]+" | tail -1 | tr -d '[:space:]')
+            # If they don't match, re-apply the per-app volume
+            if [ "$current_vol" != "$safety_vol" ]; then
+                if apply_volume "$safety_vol"; then
+                    log_msg "🔧 Safety reapply: per-app volume $safety_vol for $pkg (was $current_vol)"
+                fi
+            fi
+        fi
+    fi
 }
 
 # ── MAIN LOOP ───────────────────────────────────────────────────────────────
@@ -223,17 +244,27 @@ renice -n -15 -p $$ 2>/dev/null
 echo $$ > /dev/cpuset/top-app/tasks 2>/dev/null
 [ -f /proc/$$/oom_score_adj ] && echo -950 > /proc/$$/oom_score_adj 2>/dev/null
 
+RAPID_POLL_COUNT=0  # Counter for rapid polling on app change
+
 while true; do
     # Get current foreground package
     CURR_PKG=$(get_foreground_pkg)
     
-    # If package changed or first run, apply settings
+    # If package changed or first run, apply settings IMMEDIATELY
     if [ -n "$CURR_PKG" ] && [ "$CURR_PKG" != "$LAST_FG_PKG" ]; then
         LAST_FG_PKG="$CURR_PKG"
         log_msg "App changed: $CURR_PKG"
         apply_per_app_settings "$CURR_PKG"
+        # Reset LAST_APPLIED values to force re-apply on next poll if needed
+        RAPID_POLL_COUNT=5  # Do 5 rapid re-checks (0.3s * 5 = 1.5s total)
     fi
     
-    # Poll every 300ms for quick response
-    sleep 0.3
+    # Rapid re-polling right after app change to catch race conditions
+    if [ "$RAPID_POLL_COUNT" -gt 0 ]; then
+        sleep 0.15
+        RAPID_POLL_COUNT=$((RAPID_POLL_COUNT - 1))
+    else
+        # Normal polling
+        sleep 0.3
+    fi
 done
