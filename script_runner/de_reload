@@ -1,121 +1,90 @@
 #!/system/bin/sh
 # =============================================================================
-#  DE_RELOAD — DAVION ENGINE Daemon Reloader
-#  Called by action.sh after OTA fetch to apply new scripts without reboot.
-#  Restarts: WebUI httpd, encore_app_daemon, idle60_daemon, rr_guard,
-#            headset_daemon, otg_daemon, thermal_watchdog, hot_reload_daemon
+#  DE_RELOAD — Hot-apply all engine settings and restart all daemons
+#  Used after OTA updates or manual changes to ensure effects are applied.
 # =============================================================================
 
-MODID="GovThermal"
-MODDIR="/data/adb/modules/$MODID"
-LOG="/sdcard/GovThermal/GovThermal.log"
+MODDIR="/data/adb/modules/GovThermal"
+BB="$MODDIR/busybox"
+LOG="$MODDIR/service.log"
 CFG_DIR="/sdcard/GovThermal/config"
+DE_ENGINE="$MODDIR/DAVION_ENGINE/AI_MODE/de_cpu_engine"
+DE_TOAST="$MODDIR/script_runner/de_toast"
 
-log_msg() { echo "[$(date '+%H:%M:%S')] [DE_RELOAD] $1" >> "$LOG"; }
+log_msg() { echo "[$(date '+%H:%M:%S')] [RELOAD] $1" >> "$LOG"; }
+notify() { [ -x "$DE_TOAST" ] && "$DE_TOAST" "$1" "RELOAD" "$2" 2>/dev/null & }
 
-log_msg "=== OTA reload triggered ==="
+log_msg "Starting full reload..."
+notify "Applying changes..." "info"
 
-# ── Fix permissions on freshly fetched files ──────────────────
-find "$MODDIR/script_runner"    -type f -exec chmod 755 {} \; 2>/dev/null
-find "$MODDIR/logcat_detection" -type f -exec chmod 755 {} \; 2>/dev/null
-find "$MODDIR/webroot/cgi-bin"  -type f -exec chmod 755 {} \; 2>/dev/null
-chmod 755 "$MODDIR/busybox" 2>/dev/null
-log_msg "Permissions fixed"
-
-# ── WebUI (httpd) ─────────────────────────────────────────────
-pkill -f "busybox.*httpd.*8080" 2>/dev/null
-pkill -f "httpd.*8080"          2>/dev/null
-sleep 0.5
-"$MODDIR/busybox" httpd -p 8080 \
-    -h "$MODDIR/webroot/" \
-    -c "$MODDIR/httpd.conf" \
-    >> "$MODDIR/httpd.log" 2>&1 &
-echo $! > "$MODDIR/httpd.pid"
-log_msg "WebUI restarted (PID $!)"
-
-# ── Encore App Daemon ─────────────────────────────────────────
+# ── 1. Kill all background daemons ───────────────────────────
+log_msg "Stopping daemons..."
 pkill -f "encore_app_daemon" 2>/dev/null
-sleep 0.3
-ENCORE_DAEMON="$MODDIR/script_runner/encore_app_daemon"
-if [ -x "$ENCORE_DAEMON" ]; then
-    nohup sh "$ENCORE_DAEMON" >> "$LOG" 2>&1 &
-    log_msg "encore_app_daemon restarted (PID $!)"
-fi
-
-# ── Auto 60Hz Drop (idle60_daemon) ────────────────────────────
-pkill -f "idle60_daemon" 2>/dev/null
-sleep 0.3
-IDLE60_FLAG="$CFG_DIR/idle60_enabled"
-IDLE60_DAEMON="$MODDIR/script_runner/idle60_daemon"
-if [ -f "$IDLE60_FLAG" ] && [ "$(tr -d '[:space:]' < "$IDLE60_FLAG")" = "1" ]; then
-    if [ -x "$IDLE60_DAEMON" ]; then
-        nohup sh "$IDLE60_DAEMON" >> "$LOG" 2>&1 &
-        log_msg "idle60_daemon restarted (PID $!)"
-    fi
-else
-    log_msg "idle60_daemon skipped (disabled)"
-fi
-
-# ── RR Guard ─────────────────────────────────────────────────
+pkill -f "GovThermal.*logcat" 2>/dev/null
+pkill -f "GovThermal.*dumpsys2" 2>/dev/null
 pkill -f "rr_guard" 2>/dev/null
-sleep 0.3
-RR_GUARD_FLAG="$CFG_DIR/rr_guard_enabled"
-RR_GUARD_DAEMON="$MODDIR/script_runner/rr_guard"
-if [ -f "$RR_GUARD_FLAG" ] && [ "$(tr -d '[:space:]' < "$RR_GUARD_FLAG")" = "1" ]; then
-    if [ -x "$RR_GUARD_DAEMON" ]; then
-        nohup sh "$RR_GUARD_DAEMON" >> "$LOG" 2>&1 &
-        log_msg "rr_guard restarted (PID $!)"
-    fi
-else
-    log_msg "rr_guard skipped (disabled)"
-fi
-
-# ── Headset Daemon ────────────────────────────────────────────
+pkill -f "idle60_daemon" 2>/dev/null
+pkill -f "battery_guard" 2>/dev/null
 pkill -f "headset_daemon" 2>/dev/null
-sleep 0.3
-HEADSET_VOL_FLAG="$CFG_DIR/headset_vol_on_connect"
-HEADSET_MUTE_FLAG="$CFG_DIR/headset_mute_on_disconnect"
-HEADSET_RESTORE_FLAG="$CFG_DIR/headset_restore_on_disconnect"
-HEADSET_DAEMON="$MODDIR/script_runner/headset_daemon"
-if [ -f "$HEADSET_VOL_FLAG" ] || [ -f "$HEADSET_MUTE_FLAG" ] || [ -f "$HEADSET_RESTORE_FLAG" ]; then
-    if [ -x "$HEADSET_DAEMON" ]; then
-        nohup sh "$HEADSET_DAEMON" >> "$LOG" 2>&1 &
-        log_msg "headset_daemon restarted (PID $!)"
-    fi
-else
-    log_msg "headset_daemon skipped (no flags set)"
-fi
-
-# ── OTG Daemon ────────────────────────────────────────────────
 pkill -f "otg_daemon" 2>/dev/null
-sleep 0.3
-OTG_DAEMON="$MODDIR/script_runner/otg_daemon"
-if [ -x "$OTG_DAEMON" ]; then
-    nohup sh "$OTG_DAEMON" >> "$LOG" 2>&1 &
-    log_msg "otg_daemon restarted (PID $!)"
-fi
-
-# ── Thermal Watchdog ─────────────────────────────────────────
 pkill -f "thermal_watchdog" 2>/dev/null
-sleep 0.3
-THERMAL_STATE="$(tr -d '[:space:]' < "$CFG_DIR/thermal_state" 2>/dev/null)"
-THERMAL_WATCHDOG="$MODDIR/script_runner/thermal_watchdog"
-if [ "$THERMAL_STATE" = "disabled" ]; then
-    if [ -x "$THERMAL_WATCHDOG" ]; then
-        nohup sh "$THERMAL_WATCHDOG" >> "$LOG" 2>&1 &
-        log_msg "thermal_watchdog restarted (PID $!)"
-    fi
-else
-    log_msg "thermal_watchdog skipped (thermal not disabled)"
-fi
-
-# ── Hot Reload Daemon ─────────────────────────────────────────
+pkill -f "ai_thermal_predict" 2>/dev/null
+pkill -f "ai_adaptive_freq" 2>/dev/null
+pkill -f "ai_app_classifier" 2>/dev/null
 pkill -f "hot_reload_daemon" 2>/dev/null
-sleep 0.3
-HOT_RELOAD="$MODDIR/script_runner/hot_reload_daemon"
-if [ -x "$HOT_RELOAD" ]; then
-    nohup sh "$HOT_RELOAD" >> "$LOG" 2>&1 &
-    log_msg "hot_reload_daemon restarted (PID $!)"
+# Note: httpd is usually handled separately or restarted if webroot changed, 
+# but we can restart it here too for a "full" reload.
+pkill -f "httpd.*8080" 2>/dev/null
+
+# ── 2. Re-apply Engine Settings ──────────────────────────────
+if [ -f "$DE_ENGINE" ]; then
+    chmod 755 "$DE_ENGINE" 2>/dev/null
+    . "$DE_ENGINE"
+    
+    SAVED_PROFILE=$(tr -d '[:space:]' < "$CFG_DIR/active_profile" 2>/dev/null)
+    [ -z "$SAVED_PROFILE" ] && SAVED_PROFILE="balanced"
+    
+    case "$SAVED_PROFILE" in
+        performance) de_performance_cpu; log_msg "Applied: Performance profile" ;;
+        powersave)   de_powersave_cpu;   log_msg "Applied: Powersave profile"   ;;
+        *)           de_balanced_cpu;    log_msg "Applied: Balanced profile"    ;;
+    esac
 fi
 
-log_msg "=== OTA reload complete ==="
+# ── 3. Re-apply Thermal State ────────────────────────────────
+THERMAL_SCRIPT="$MODDIR/script_runner/thermal_toggle"
+THERMAL_STATE=$(tr -d '[:space:]' < "$CFG_DIR/thermal_state" 2>/dev/null)
+if [ "$THERMAL_STATE" = "disabled" ]; then
+    sh "$THERMAL_SCRIPT" disable 2>/dev/null
+    log_msg "Applied: Thermal disabled"
+else
+    sh "$THERMAL_SCRIPT" enable 2>/dev/null
+    log_msg "Applied: Thermal enabled"
+fi
+
+# ── 4. Re-apply SurfaceFlinger & Display ─────────────────────
+# (Simplified version of service.sh logic)
+SAT_FILE="/sdcard/DAVION_ENGINE_BoostColor/saturation_value"
+[ -f "$SAT_FILE" ] && SAT_VAL=$(tr -d '[:space:]' < "$SAT_FILE") && \
+    service call SurfaceFlinger 1022 f "$SAT_VAL" >/dev/null 2>&1
+
+# ── 5. Restart all daemons ───────────────────────────────────
+log_msg "Restarting daemons..."
+nohup sh "$MODDIR/script_runner/encore_app_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/logcat_detection/logcat" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/rr_guard" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/idle60_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/battery_guard" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/headset_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/otg_daemon" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/thermal_watchdog" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/ai_thermal_predict" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/ai_adaptive_freq" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/ai_app_classifier" >> "$LOG" 2>&1 &
+nohup sh "$MODDIR/script_runner/hot_reload_daemon" >> "$LOG" 2>&1 &
+
+# Restart WebUI
+"$BB" httpd -p 8080 -h "$MODDIR/webroot" -c "$MODDIR/httpd.conf" >> "$LOG" 2>&1 &
+
+log_msg "Full reload complete."
+notify "Changes applied successfully!" "success"

@@ -1,206 +1,216 @@
 #!/system/bin/sh
 # =============================================================================
-#  IDLE60 DAEMON — Auto 60Hz Drop on Touch Idle
-#  Drops refresh rate to 60Hz when no touch is detected for N seconds.
-#
-#  Spare hierarchy (highest priority first):
-#   1. Universal Spare toggle  → /sdcard/GovThermal/config/idle60_spare_universal
-#   2. Per-app spare list      → /sdcard/DAVION_ENGINE/idle60_spare.txt
-#   3. Per-app .spare flag     → /sdcard/DAVION_ENGINE/refresh_locks/<pkg>.spare
-#   4. Per-app custom delay    → /sdcard/DAVION_ENGINE/idle60_delays.txt (pkg:seconds)
-#
-#  State files:
-#   Enabled : /sdcard/GovThermal/config/idle60_enabled
-#   Delay   : /sdcard/GovThermal/config/idle60_delay
+#  IDLE 60HZ DAEMON v3 — simple, proven approach.
+#  Drop to 60Hz on idle. Instant restore on touch via background watcher.
 # =============================================================================
 
 MODDIR="/data/adb/modules/GovThermal"
+BB="$MODDIR/busybox"
+[ ! -x "$BB" ] && BB="$(which busybox 2>/dev/null)"
+[ -z "$BB" ] || {
+    date()  { "$BB" date  "$@"; }
+    grep()  { "$BB" grep  "$@"; }
+}
+
 LOG="/sdcard/GovThermal/GovThermal.log"
 CFG_DIR="/sdcard/GovThermal/config"
-DAVION_DIR="/sdcard/DAVION_ENGINE"
-
-IDLE60_ENABLED_FILE="$CFG_DIR/idle60_enabled"
-IDLE60_DELAY_FILE="$CFG_DIR/idle60_delay"
-IDLE60_SPARE_FILE="$DAVION_DIR/idle60_spare.txt"
-IDLE60_DELAYS_FILE="$DAVION_DIR/idle60_delays.txt"
-UNIV_SPARE60_FILE="$CFG_DIR/idle60_spare_universal"
-UNIVERSAL_RR_FILE="$DAVION_DIR/universal_rr.txt"
-RR_DIR="$DAVION_DIR/refresh_locks"
-
-TOUCH_FLAG="/dev/.davion_idle60_touch"
+RR_LOCK_DIR="/sdcard/DAVION_ENGINE/refresh_locks"
+ENABLED_FILE="$CFG_DIR/idle60_enabled"
+DELAY_FILE="$CFG_DIR/idle60_delay"
+SPARE_FILE="/sdcard/DAVION_ENGINE/idle60_spare.txt"
+UNIVERSAL_RR_FILE="/sdcard/DAVION_ENGINE/universal_rr.txt"
+LAST_FG_PKG="/dev/.davion_last_fg_pkg"
+TOUCH_TS="/data/local/tmp/idle60_ts"   # updated by heartbeat on every touch
+IDLE60_FLAG="/dev/.davion_idle60_dropped"  # signals rr_guard that we intentionally dropped
+RESTORE_FLAG="/dev/.davion_idle60_restore"   # heartbeat sets this to trigger instant restore
+CACHED_RR="/dev/.davion_idle60_cached_rr"   # pre-cached target mode at drop time (tmpfs, zero-cost read)
 
 log_msg() { echo "[$(date '+%H:%M:%S')] [IDLE60] $1" >> "$LOG"; }
 
-log_msg "Daemon started (PID $$)"
+renice -n -10 -p $$ 2>/dev/null
+echo $$ > /dev/cpuset/top-app/tasks 2>/dev/null
+[ -f /proc/$$/oom_score_adj ] && echo -900 > /proc/$$/oom_score_adj 2>/dev/null
 
-# ── Sanity: exit if idle60 is disabled ───────────────────────
-_en=$(tr -d '[:space:]' < "$IDLE60_ENABLED_FILE" 2>/dev/null)
-if [ "$_en" != "1" ]; then
-    log_msg "idle60_enabled != 1 — exiting"
-    exit 0
-fi
+UNIVERSAL_SPARE_FILE="/sdcard/GovThermal/config/idle60_spare_universal"
 
-# ── Get current foreground package ───────────────────────────
-get_foreground_pkg() {
-    local pkg
-    pkg=$(dumpsys activity top 2>/dev/null \
-        | grep -m1 "ACTIVITY" \
-        | grep -oE "[a-z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+" \
-        | head -1)
-    echo "$pkg"
-}
+get_fg_pkg()     { cat "$LAST_FG_PKG"    2>/dev/null | tr -d '[:space:]'; }
 
-# ── Per-app delay override ────────────────────────────────────
-get_app_delay() {
-    local pkg="$1"
-    local default="$2"
-    if [ -f "$IDLE60_DELAYS_FILE" ] && [ -n "$pkg" ]; then
-        local line d
-        line=$(grep "^${pkg}:" "$IDLE60_DELAYS_FILE" 2>/dev/null | head -1)
-        if [ -n "$line" ]; then
-            d=$(echo "$line" | cut -d: -f2 | tr -d '[:space:]')
-            [ -n "$d" ] && echo "$d" && return
-        fi
+# App is spared if: in spare list OR universal RR spare is on and this app has no per-app RR
+is_spared() {
+    [ -z "$1" ] && return 1
+    # Per-app dedicated spare flag (set via App/Game Configuration popup)
+    [ -f "$RR_LOCK_DIR/${1}.spare" ] && return 0
+    # Legacy: per-app/game spare list (idle60 panel list)
+    [ -f "$SPARE_FILE" ] && grep -Fxq "$1" "$SPARE_FILE" 2>/dev/null && return 0
+    # Universal spare: only applies to apps that HAVE a per-app RR lock
+    if [ -f "$UNIVERSAL_SPARE_FILE" ] && [ -f "$RR_LOCK_DIR/${1}.mode" ]; then
+        return 0
     fi
-    echo "$default"
+    return 1
+}
+now_ts()         { date +%s; }
+
+get_restore_mode() {
+    local pkg="$1" mode=""
+    [ -n "$pkg" ] && [ -f "$RR_LOCK_DIR/${pkg}.mode" ] && \
+        mode=$(tr -d '[:space:]' < "$RR_LOCK_DIR/${pkg}.mode" 2>/dev/null)
+    [ -z "$mode" ] && [ -f "$UNIVERSAL_RR_FILE" ] && \
+        mode=$(tr -d '[:space:]' < "$UNIVERSAL_RR_FILE" 2>/dev/null)
+    echo "${mode:-0}"
 }
 
-# ── Restore to universal RR ───────────────────────────────────
-restore_rr() {
-    local mode
-    mode=$(tr -d '[:space:]' < "$UNIVERSAL_RR_FILE" 2>/dev/null)
-    if [ -n "$mode" ] && [ "$mode" -eq "$mode" ] 2>/dev/null && [ "$mode" -gt 0 ]; then
-        service call SurfaceFlinger 1035 i32 "$mode" >/dev/null 2>&1
-        log_msg "RR restored: mode $mode"
+get_60hz_mode() {
+    local mode0 sdk
+    sdk=$(getprop ro.build.version.sdk 2>/dev/null)
+    if [ "${sdk:-0}" -gt 30 ] 2>/dev/null; then
+        mode0=$(dumpsys display 2>/dev/null | \
+            grep -A 24 'mSfDisplayModes=' | grep ' DisplayMode{id=' | \
+            while IFS= read -r l; do
+                local i f
+                i=$(echo "$l" | grep -oE 'id=[0-9]+' | grep -oE '[0-9]+')
+                f=$(echo "$l" | grep -oE 'refreshRate=[0-9]+' | grep -oE '[0-9]+')
+                [ -z "$f" ] && f=$(echo "$l" | grep -oE 'vsyncRate=[0-9]+' | grep -oE '[0-9]+')
+                [ -n "$i" ] && [ "$f" = "60" ] && echo "$i" && break
+            done)
     else
-        service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1
-        log_msg "RR restored: mode 0 (auto)"
+        mode0=$(dumpsys display 2>/dev/null | \
+            grep -B2 'fps=60\.' | grep -oE 'id=[0-9]+' | head -1 | grep -oE '[0-9]+')
     fi
+    echo "${mode0:-0}"
 }
 
-# ── getevent touch watcher (background) ──────────────────────
-# getevent -c 1 blocks until ONE input event fires, then exits.
-# Loop forever: any input event (touch, button, sensor) = user activity.
-# Rate-limit writes to once per second max to avoid hammering sdcard.
-echo "$(date +%s)" > "$TOUCH_FLAG"
+find_ts_dev() {
+    for d in /dev/input/event*; do
+        getevent -p "$d" 2>/dev/null | grep -q "0035" && echo "$d" && return
+    done
+    for d in /dev/input/event*; do
+        getevent -p "$d" 2>/dev/null | grep -q "ABS_MT" && echo "$d" && return
+    done
+}
 
+# ── startup ──────────────────────────────────────────────────
+TS_DEV=$(find_ts_dev)
+[ -z "$TS_DEV" ] && log_msg "No touchscreen found" && exit 1
+
+MODE_60=$(get_60hz_mode)
+log_msg "v3 start | dev=$TS_DEV mode60=$MODE_60"
+
+# heartbeat: fires on touch DOWN events only, updates timestamp
+# Restore command is signalled via CACHED_RR — built at drop time, read once
+pkill -f "getevent $TS_DEV" 2>/dev/null
 (
-    _last_write=0
-    while true; do
-        getevent -c 1 >/dev/null 2>&1
-        _now=$(date +%s)
-        if [ $(( _now - _last_write )) -ge 1 ]; then
-            echo "$_now" > "$TOUCH_FLAG"
-            _last_write=$_now
-        fi
+    # Filter for ABS_MT_TRACKING_ID events (touch DOWN) — fires once per finger down
+    # This avoids firing on every move/up event, reducing noise
+    getevent -l "$TS_DEV" 2>/dev/null | while IFS= read -r line; do
+        case "$line" in
+            *ABS_MT_TRACKING_ID*|*BTN_TOUCH*DOWN*|*EV_SYN*)
+                now=$(date +%s 2>/dev/null)
+                printf '%s' "$now" > "$TOUCH_TS" 2>/dev/null
+                # Instant restore — CACHED_RR written at drop time (tmpfs)
+                if [ -f "$CACHED_RR" ]; then
+                    _m=$(cat "$CACHED_RR" 2>/dev/null)
+                    if [ -n "$_m" ] && [ "$_m" != "0" ]; then
+                        # Restore: release min first (avoid frame drop), then SF mode
+                        service call SurfaceFlinger 1035 i32 "$_m" >/dev/null 2>&1
+                        settings delete system min_refresh_rate 2>/dev/null
+                        touch "$RESTORE_FLAG" 2>/dev/null
+                        rm -f "$CACHED_RR" "$IDLE60_FLAG" 2>/dev/null
+                    fi
+                fi
+                ;;
+        esac
     done
 ) &
-_GE_PID=$!
-log_msg "getevent watcher started (PID $_GE_PID)"
+HB=$!
 
-# ── Cleanup on exit ───────────────────────────────────────────
-cleanup() {
-    kill "$_GE_PID" 2>/dev/null
-    # getevent -c 1 child will exit naturally after 1 input event
-    log_msg "Daemon exiting"
-    exit 0
-}
-trap cleanup INT TERM
+now_ts > "$TOUCH_TS" 2>/dev/null   # seed so we don't drop immediately
 
-# ── Main loop ─────────────────────────────────────────────────
-# Behavior:
-#   Universal SPARE ON  + no per-app mode → skip drop (protect universal RR)
-#   Universal SPARE ON  + has per-app mode → ALLOW drop; restore to per-app on touch
-#   Universal SPARE OFF + any app          → normal drop; restore on touch
-#   App change (dropped state)             → restore: per-app mode if exists, else universal
-#   Touch detected (via TOUCH_FLAG change) → restore immediately, no timing race
-DROPPED=0
+_st="PERF"          # PERF | SAVE
+_drop_at=0          # when we last dropped
 _last_pkg=""
-_last_touch_ts=0
+
+cleanup() { kill $HB 2>/dev/null; rm -f "$TOUCH_TS" "$IDLE60_FLAG" "$RESTORE_FLAG" "$CACHED_RR"; log_msg "stopped"; exit 0; }
+trap cleanup INT TERM EXIT
 
 while true; do
+    # still enabled?
+    [ "$(tr -d '[:space:]' < "$ENABLED_FILE" 2>/dev/null)" = "1" ] || { log_msg "disabled"; cleanup; }
 
-    # Re-read enabled flag live (WebUI may toggle mid-run)
-    _en=$(tr -d '[:space:]' < "$IDLE60_ENABLED_FILE" 2>/dev/null)
-    if [ "$_en" != "1" ]; then
-        [ "$DROPPED" = "1" ] && restore_rr
-        log_msg "Disabled via flag — exiting"
-        cleanup
-    fi
+    DELAY=$(tr -d '[:space:]' < "$DELAY_FILE" 2>/dev/null); DELAY=${DELAY:-5}
+    NOW=$(now_ts)
+    PKG=$(get_fg_pkg)
 
-    # Read global delay
-    DELAY=$(tr -d '[:space:]' < "$IDLE60_DELAY_FILE" 2>/dev/null)
-    [ -z "$DELAY" ] && DELAY=5
-
-    # ── Detect foreground app ─────────────────────────────────
-    CUR_PKG=$(get_foreground_pkg)
-
-    # ── Check per-app RR mode for current app ─────────────────
-    HAS_PERAPP=0
-    PERAPP_MODE=""
-    if [ -n "$CUR_PKG" ] && [ -f "$RR_DIR/$CUR_PKG.mode" ]; then
-        PERAPP_MODE=$(tr -d '[:space:]' < "$RR_DIR/$CUR_PKG.mode" 2>/dev/null)
-        [ -n "$PERAPP_MODE" ] && HAS_PERAPP=1
-    fi
-
-    # ── App changed → restore to correct mode for new app ─────
-    if [ "$CUR_PKG" != "$_last_pkg" ]; then
-        if [ "$DROPPED" = "1" ]; then
-            if [ "$HAS_PERAPP" = "1" ]; then
-                service call SurfaceFlinger 1035 i32 "$PERAPP_MODE" >/dev/null 2>&1
-                log_msg "App changed → $CUR_PKG — restored to per-app mode $PERAPP_MODE"
-            else
-                restore_rr
-                log_msg "App changed → $CUR_PKG — restored to universal RR"
-            fi
-            DROPPED=0
+    # app switch → instant restore + reset idle
+    if [ "$PKG" != "$_last_pkg" ]; then
+        _last_pkg="$PKG"
+        if [ "$_st" = "SAVE" ]; then
+            RR=$(get_restore_mode "$PKG")
+            service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
+            settings delete system min_refresh_rate 2>/dev/null
+            rm -f "$IDLE60_FLAG" "$CACHED_RR" 2>/dev/null
+            _st="PERF"; _drop_at=0
+            log_msg "app-switch [$PKG] → RR $RR"
         fi
-        _last_pkg="$CUR_PKG"
+        now_ts > "$TOUCH_TS" 2>/dev/null
     fi
 
-    # ── Universal SPARE logic ─────────────────────────────────
-    # SPARE ON + no per-app mode → protect universal, skip drop
-    # SPARE ON + has per-app mode → allow drop (per-app RR can still idle-drop)
-    if [ -f "$UNIV_SPARE60_FILE" ] && [ "$HAS_PERAPP" = "0" ]; then
-        if [ "$DROPPED" = "1" ]; then
-            restore_rr
-            DROPPED=0
-            log_msg "Universal SPARE ON + no per-app mode — restored"
+    # spared app → stay full RR
+    if is_spared "$PKG"; then
+        if [ "$_st" = "SAVE" ]; then
+            RR=$(get_restore_mode "$PKG")
+            service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
+            settings delete system min_refresh_rate 2>/dev/null
+            rm -f "$IDLE60_FLAG" 2>/dev/null
+            _st="PERF"; _drop_at=0
+            log_msg "spared [$PKG] → RR $RR"
         fi
-        sleep 2
-        continue
+        sleep 1; continue
     fi
 
-    # ── Read touch timestamp ───────────────────────────────────
-    CUR_TOUCH=$(tr -d '[:space:]' < "$TOUCH_FLAG" 2>/dev/null)
-    NOW=$(date +%s)
-    [ -z "$CUR_TOUCH" ] && CUR_TOUCH="$NOW"
-    IDLE=$((NOW - CUR_TOUCH))
+DELAYS_FILE="/sdcard/DAVION_ENGINE/idle60_delays.txt"
 
-    # ── Touch detected: timestamp changed since last loop ──────
-    # Using change-detection instead of IDLE < N avoids the timing race
-    # where a touch at t=0 is missed if the loop runs at t=2+.
-    if [ "$DROPPED" = "1" ] && [ "$CUR_TOUCH" != "$_last_touch_ts" ]; then
-        if [ "$HAS_PERAPP" = "1" ] && [ -n "$PERAPP_MODE" ]; then
-            service call SurfaceFlinger 1035 i32 "$PERAPP_MODE" >/dev/null 2>&1
-            log_msg "Touch — restored to per-app mode $PERAPP_MODE ($CUR_PKG)"
-        else
-            restore_rr
-            log_msg "Touch — restored to universal RR"
+    # read latest touch time
+    LAST=$(tr -d '[:space:]' < "$TOUCH_TS" 2>/dev/null)
+    [ -z "$LAST" ] && LAST="$NOW"
+
+    # per-app delay override
+    PKG_DELAY=""
+    if [ -n "$PKG" ] && [ -f "$DELAYS_FILE" ]; then
+        PKG_DELAY=$(grep "^${PKG}:" "$DELAYS_FILE" 2>/dev/null | head -1 | cut -d: -f2 | tr -d '[:space:]')
+    fi
+    ACTIVE_DELAY=${PKG_DELAY:-$DELAY}
+
+    IDLE=$(( NOW - LAST ))
+
+    if [ "$_st" = "PERF" ]; then
+        # drop if idle long enough (per-app delay takes priority over global)
+        if [ "$IDLE" -ge "$ACTIVE_DELAY" ]; then
+            _target=$(get_restore_mode "$PKG")
+            printf '%s' "$_target" > "$CACHED_RR" 2>/dev/null
+            # Drop to 60Hz: SF mode + settings triple-enforce
+            service call SurfaceFlinger 1035 i32 "$MODE_60" >/dev/null 2>&1
+            settings put system min_refresh_rate 60.0 2>/dev/null &
+            touch "$IDLE60_FLAG" 2>/dev/null
+            _st="SAVE"
+            _drop_at="$NOW"
+            log_msg "drop idle=${IDLE}s delay=${ACTIVE_DELAY}s [$PKG] → 60hz | restore target=$_target"
+
         fi
-        DROPPED=0
-    fi
-    _last_touch_ts="$CUR_TOUCH"
-
-    # Per-app custom delay override — validate numeric to prevent silent fail
-    EFF_DELAY=$(get_app_delay "$CUR_PKG" "$DELAY")
-    [ "$EFF_DELAY" -eq "$EFF_DELAY" ] 2>/dev/null || EFF_DELAY="$DELAY"
-
-    # ── Idle threshold reached → drop to 60Hz ─────────────────
-    if [ "$IDLE" -ge "$EFF_DELAY" ] && [ "$DROPPED" = "0" ]; then
-        service call SurfaceFlinger 1035 i32 0 >/dev/null 2>&1
-        DROPPED=1
-        log_msg "60Hz drop — idle=${IDLE}s delay=${EFF_DELAY}s app=$CUR_PKG perapp=$HAS_PERAPP"
+    else
+        # SAVE state: heartbeat handles instant restore; main loop just syncs state
+        if [ -f "$RESTORE_FLAG" ]; then
+            rm -f "$RESTORE_FLAG" 2>/dev/null
+            _st="PERF"; _drop_at=0
+            log_msg "touch! [$PKG] → restored by heartbeat"
+        elif [ "$LAST" -gt "$_drop_at" ] 2>/dev/null; then
+            # fallback: heartbeat updated TOUCH_TS but flag write may have raced
+            RR=$(get_restore_mode "$PKG")
+            service call SurfaceFlinger 1035 i32 "$RR" >/dev/null 2>&1
+            settings delete system min_refresh_rate 2>/dev/null
+            rm -f "$IDLE60_FLAG" "$RESTORE_FLAG" "$CACHED_RR" 2>/dev/null
+            _st="PERF"; _drop_at=0
+            log_msg "touch! [$PKG] → restored RR $RR (fallback)"
+        fi
     fi
 
     sleep 1

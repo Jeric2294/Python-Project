@@ -1,10 +1,12 @@
 #!/system/bin/sh
 # =============================================================================
-#  IMPROVED COOL MODE — Optimized for DAVION ENGINE
-#  Target: Less Heating + No Framedrop (Balanced Performance)
-#  Strategies: Smart Thermal + EEM Undervolt + Schedutil Gaming + CPUSet
+#  COOL MODE — Targeted heat reduction for DAVION ENGINE
+#  6 strategies: GPU Power Tuning + EEM Extended + Schedutil
+#                + DRAM OPP floor + GPU DCS + CPU Idle MCDI
 #
 #  Usage: cool_mode enable | disable
+#
+#  Device: MT6855 (Dimensity 6080) — Infinix Note 30 5G
 # =============================================================================
 
 MODDIR="/data/adb/modules/GovThermal"
@@ -27,14 +29,14 @@ de_write() {
 tune_gpu_power() {
     local enable="$1"
     if [ "$enable" = "1" ]; then
-        # Reduce GPU boost aggressiveness but keep it responsive
+        # Reduce GPU boost aggressiveness
         de_write 0 /sys/kernel/ged/hal/gpu_boost_level
-        de_write 1 /sys/kernel/ged/hal/enable_gpu_boost
-        # Reactive DVFS — responds to actual load
+        de_write 0 /sys/kernel/ged/hal/enable_gpu_boost
+        # Reactive DVFS — responds to actual load, not predictive bursts
         de_write 0 /sys/kernel/ged/hal/dvfs_loading_mode
         # Reduce GED log overhead
         de_write 0 /sys/kernel/ged/hal/ged_log_buf_size_k
-        log_msg "GPU: boost optimized, DVFS reactive mode"
+        log_msg "GPU: boost disabled, DVFS reactive mode"
     else
         # Restore GED defaults
         de_write 0 /sys/kernel/ged/hal/gpu_boost_level
@@ -44,29 +46,31 @@ tune_gpu_power() {
     fi
 }
 
-# ── 2. EEM Extended Offsets (Undervolting) ───────────────────
+# ── 2. EEM Extended Offsets (GPU + GPU_HI) ───────────────────
 tune_eem_gpu() {
     local val="$1"
     local cpuvolt_on=0
+    # Check if CPU Volt Optimizer is already ON — skip CPU EEM to avoid overwriting -12
     [ "$(cat /sdcard/GovThermal/config/cpuvolt_enabled 2>/dev/null | tr -d '[:space:]')" = "1" ] && cpuvolt_on=1
 
-    # GPU EEM offset
+    # GPU EEM offset — uses eemg (separate from CPU eem nodes)
     de_write "$val" /proc/eemg/EEMG_DET_GPU/eemg_offset
     de_write "$val" /proc/eemg/EEMG_DET_GPU_HI/eemg_offset
 
+    # CPU cluster EEM — only apply if CPU Volt Optimizer is OFF
+    # (CPU Volt uses -12 which is stronger; Cool Mode uses -8 — respect the stronger value)
     if [ "$cpuvolt_on" = "0" ]; then
-        # Slightly more aggressive undervolt for better cooling
         de_write "$val" /proc/eem/EEM_DET_B/eem_offset
         de_write "$val" /proc/eem/EEM_DET_BL/eem_offset
         de_write "$val" /proc/eem/EEM_DET_L/eem_offset
-        de_write "-6"   /proc/eem/EEM_DET_CCI/eem_offset
-        log_msg "EEM: GPU+CPU offsets set to $val (CCI: -6)"
+        de_write "-4"   /proc/eem/EEM_DET_CCI/eem_offset
+        log_msg "EEM: GPU+CPU offsets set to $val (CCI: -4)"
     else
         log_msg "EEM: GPU offset $val applied — CPU EEM skipped (CPU Volt Optimizer is ON)"
     fi
 }
 
-# ── 3. Schedutil Gaming Tuning ────────────────────────────────
+# ── 3. Schedutil Fine-Tuning ──────────────────────────────────
 tune_schedutil() {
     local enable="$1"
     for policy in /sys/devices/system/cpu/cpufreq/policy*; do
@@ -74,18 +78,18 @@ tune_schedutil() {
         local su_path="$policy/schedutil"
         local hz_path="$policy/schedhorizon"
         if [ "$enable" = "1" ]; then
-            # Faster ramp-up (1000us) — ensures no frame drops when load spikes
-            # Moderate ramp-down (8000us) — prevents freq jitter
+            # Slower ramp-up (2000us) — prevents unnecessary freq spikes
+            # Faster ramp-down (7000us) — drops freq sooner when load reduces
             if [ -d "$hz_path" ]; then
-                de_write 1000  "$hz_path/up_rate_limit_us"
-                de_write 8000  "$hz_path/down_rate_limit_us"
+                de_write 2000  "$hz_path/up_rate_limit_us"
+                de_write 7000  "$hz_path/down_rate_limit_us"
             fi
             if [ -d "$su_path" ]; then
-                de_write 1000  "$su_path/up_rate_limit_us"
-                de_write 8000  "$su_path/down_rate_limit_us"
+                de_write 2000  "$su_path/up_rate_limit_us"
+                de_write 7000  "$su_path/down_rate_limit_us"
             fi
         else
-            # Restore balanced defaults
+            # Restore balanced defaults (from de_tune_schedutil balance mode)
             if [ -d "$hz_path" ]; then
                 de_write 7500  "$hz_path/up_rate_limit_us"
                 de_write 14000 "$hz_path/down_rate_limit_us"
@@ -96,22 +100,26 @@ tune_schedutil() {
             fi
         fi
     done
-    log_msg "Schedutil: $([ "$enable" = "1" ] && echo 'gaming-cool tuning' || echo 'defaults restored')"
+    log_msg "Schedutil: $([ "$enable" = "1" ] && echo 'cool tuning' || echo 'defaults restored')"
 }
 
 # ── 4. DRAM/DVFSRC OPP Floor ─────────────────────────────────
 tune_dram_opp() {
     local enable="$1"
+    # Confirmed paths from de_cpu_engine (MT6855 / Dimensity 6080):
+    # dvfsrc_req_ddr_opp lives under helio-dvfsrc subdir
+    # dvfsrc_force_vcore_dvfs_opp lives under /sys/kernel/helio-dvfsrc/
     local found=0
-    for base in "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc" "/sys/devices/platform/10042000.dvfsrc/helio-dvfsrc" "/sys/devices/platform/1c00f000.dvfsrc/mtk-dvfsrc-devfreq/devfreq/mtk-dvfsrc-devfreq"; do
+    for base in         "/sys/devices/platform/10012000.dvfsrc/helio-dvfsrc"         "/sys/devices/platform/10042000.dvfsrc/helio-dvfsrc"         "/sys/devices/platform/1c00f000.dvfsrc/mtk-dvfsrc-devfreq/devfreq/mtk-dvfsrc-devfreq"; do
         if [ -d "$base" ]; then
             found=1
             if [ "$enable" = "1" ]; then
-                # Allow lowest DRAM OPP for cooling, but keep a reasonable floor for gaming
+                # Allow lowest DRAM OPP — no forced floor
                 de_write 0  "$base/dvfsrc_req_ddr_opp"
                 de_write 0  /sys/kernel/helio-dvfsrc/dvfsrc_force_vcore_dvfs_opp
-                log_msg "DRAM: OPP floor released for efficiency"
+                log_msg "DRAM: OPP floor released via $base"
             else
+                # Restore default — -1 = kernel managed (confirmed in de_cpu_engine balance)
                 de_write -1 "$base/dvfsrc_req_ddr_opp"
                 de_write -1 /sys/kernel/helio-dvfsrc/dvfsrc_force_vcore_dvfs_opp
                 log_msg "DRAM: OPP restored to kernel-managed (-1)"
@@ -119,110 +127,166 @@ tune_dram_opp() {
             break
         fi
     done
+    [ "$found" = "0" ] && log_msg "DRAM: dvfsrc node not found — skipping"
 }
 
-# ── 5. Smart Thermal Management (FPSGO) ──────────────────────
-tune_smart_thermal() {
+# ── 5. GPU DCS (Dynamic Core Scaling) ────────────────────────
+tune_gpu_dcs() {
     local enable="$1"
     if [ "$enable" = "1" ]; then
-        # Instead of disabling, set higher thresholds (90°C)
-        # This prevents aggressive throttling while maintaining safety
-        de_write 1 /sys/kernel/fpsgo/fbt/thrm_enable
-        de_write 90 /sys/kernel/fpsgo/fbt/thrm_temp_th
+        # Enable DCS — kernel manages active shader cores dynamically
+        # Default behavior, more efficient than always-on (Pyrox disables this)
+        de_write 1 /sys/kernel/ged/hal/dcs_mode
+        log_msg "GPU DCS: enabled (dynamic core scaling)"
+    else
+        # Restore GED default (1 = enabled)
+        de_write 1 /sys/kernel/ged/hal/dcs_mode
+        log_msg "GPU DCS: restored to default"
+    fi
+}
+
+# ── 6. CPU Idle MCDI (Multi-Core Deep Idle) ──────────────────
+tune_mcdi() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Enable deeper idle — CPU cores sleep deeper between workloads
+        de_write 1 /sys/power/mcdi_enable
+        de_write 1 /sys/devices/system/cpu/cpuidle/cpuidle_sysfs_switch
+        # Enable all CPU idle states (write 0 = enabled/not-disabled)
+        for state in /sys/devices/system/cpu/cpu*/cpuidle/state*/disable; do
+            de_write 0 "$state"
+        done
+        log_msg "MCDI: deep idle enabled"
+    else
+        # Restore defaults — both nodes default to 1 (enabled)
+        de_write 1 /sys/power/mcdi_enable
+        de_write 1 /sys/devices/system/cpu/cpuidle/cpuidle_sysfs_switch
+        log_msg "MCDI: restored to default"
+    fi
+}
+
+
+# ── 7. FPSGO Thermal Limiter ──────────────────────────────────
+tune_fpsgo_thermal() {
+    local enable="$1"
+    if [ "$enable" = "1" ]; then
+        # Disable FPSGO thermal throttle — prevents FPS drops due to heat
+        # Confirmed paths from thermal_toggle (fbt/thrm_enable, fbt/thrm_limit_cpu)
+        de_write 0 /sys/kernel/fpsgo/fbt/thrm_enable
         de_write 0 /sys/kernel/fpsgo/fbt/thrm_limit_cpu
         de_write 0 /sys/kernel/fpsgo/fbt/thrm_limit_fp
-        
-        # PPM Thermal Policy - Keep disabled for gaming as it's too aggressive
-        if [ -d /proc/ppm ]; then
-            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[0-9]+" | tr -d "["); do
-                de_write "$idx 0" /proc/ppm/policy_status
-            done
-        fi
-        log_msg "Thermal: Smart thresholds applied (90°C)"
+        log_msg "FPSGO: thermal limiter disabled"
     else
         # Restore defaults
         de_write 1 /sys/kernel/fpsgo/fbt/thrm_enable
-        de_write 75 /sys/kernel/fpsgo/fbt/thrm_temp_th
-        if [ -d /proc/ppm ]; then
-            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[0-9]+" | tr -d "["); do
+        chmod 644 /sys/kernel/fpsgo/fbt/thrm_limit_cpu 2>/dev/null
+        chmod 644 /sys/kernel/fpsgo/fbt/thrm_limit_fp  2>/dev/null
+        log_msg "FPSGO: thermal limiter restored"
+    fi
+}
+
+# ── 8. PPM THERMAL Policy Disable ────────────────────────────
+tune_ppm_thermal() {
+    local enable="$1"
+    if [ -d /proc/ppm ]; then
+        if [ "$enable" = "1" ]; then
+            # Disable THERMAL policy only (not PWR_THRO — too aggressive)
+            # Confirmed path from thermal_toggle and de_cpu_engine
+            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[[0-9]+" | tr -d "["); do
+                de_write "$idx 0" /proc/ppm/policy_status
+            done
+            log_msg "PPM: THERMAL policy disabled"
+        else
+            # Re-enable THERMAL policy
+            for idx in $(grep -i "THERMAL" /proc/ppm/policy_status 2>/dev/null | grep -oE "[[0-9]+" | tr -d "["); do
                 de_write "$idx 1" /proc/ppm/policy_status
             done
+            log_msg "PPM: THERMAL policy restored"
         fi
-        log_msg "Thermal: defaults restored"
-    fi
-}
-
-# ── 6. CPUSet Optimization ───────────────────────────────────
-tune_cpuset() {
-    local enable="$1"
-    if [ "$enable" = "1" ]; then
-        # Move background tasks to little cores (0-3)
-        # Keep big cores (4-7) for the game (top-app)
-        echo 0-3 > /dev/cpuset/background/cpus 2>/dev/null
-        echo 0-5 > /dev/cpuset/system-background/cpus 2>/dev/null
-        echo 0-7 > /dev/cpuset/top-app/cpus 2>/dev/null
-        log_msg "CPUSet: Background tasks restricted to little cores"
     else
-        # Restore defaults (usually all cores)
-        echo 0-7 > /dev/cpuset/background/cpus 2>/dev/null
-        echo 0-7 > /dev/cpuset/system-background/cpus 2>/dev/null
-        log_msg "CPUSet: defaults restored"
+        log_msg "PPM: /proc/ppm not found — skipping"
     fi
 }
 
-# ── 7. I/O and VM Optimization ───────────────────────────────
-tune_io_vm() {
+# ── 9. Thermal Message CPU Limits Reset ──────────────────────
+tune_thermal_msg() {
+    local enable="$1"
+    local cpu_limits="/sys/devices/virtual/thermal/thermal_message/cpu_limits"
+    if [ "$enable" = "1" ]; then
+        # Lift kernel-imposed CPU freq ceiling per core
+        # Confirmed path from thermal_toggle step 6
+        if [ -f "$cpu_limits" ]; then
+            for i in 0 1 2 3 4 5 6 7; do
+                local maxfreq
+                maxfreq=$(cat /sys/devices/system/cpu/cpu${i}/cpufreq/cpuinfo_max_freq 2>/dev/null)
+                [ -n "$maxfreq" ] && [ "$maxfreq" -gt 0 ] 2>/dev/null &&                     de_write "cpu${i} ${maxfreq}" "$cpu_limits"
+            done
+            log_msg "Thermal msg: CPU limits lifted to max freq"
+        else
+            log_msg "Thermal msg: cpu_limits node not found — skipping"
+        fi
+    else
+        # Restore — write 0 to let kernel re-impose its own limits
+        if [ -f "$cpu_limits" ]; then
+            for i in 0 1 2 3 4 5 6 7; do
+                de_write "cpu${i} 0" "$cpu_limits" 2>/dev/null
+            done
+            log_msg "Thermal msg: CPU limits restored"
+        fi
+    fi
+}
+
+# ── 10. GED GPU Boost Duration Reduction ─────────────────────
+tune_ged_boost() {
     local enable="$1"
     if [ "$enable" = "1" ]; then
-        # Reduce background I/O interference
-        echo 100 > /proc/sys/vm/vfs_cache_pressure
-        echo 10 > /proc/sys/vm/dirty_ratio
-        echo 3000 > /proc/sys/vm/dirty_expire_centisecs
-        log_msg "I/O & VM: Optimized for gaming stability"
+        # Reduce GPU boost aggressiveness — less peak wattage = less heat spike
+        # boost_upper_bound caps the boost level; ged_boost_enable controls bursts
+        de_write 0 /sys/kernel/ged/hal/boost_upper_bound
+        de_write 0 /sys/kernel/ged/hal/ged_boost_enable
+        log_msg "GED boost: upper bound + bursts disabled"
     else
         # Restore defaults
-        echo 100 > /proc/sys/vm/vfs_cache_pressure
-        echo 20 > /proc/sys/vm/dirty_ratio
-        echo 3000 > /proc/sys/vm/dirty_expire_centisecs
-        log_msg "I/O & VM: defaults restored"
+        de_write 100 /sys/kernel/ged/hal/boost_upper_bound
+        de_write 1   /sys/kernel/ged/hal/ged_boost_enable
+        log_msg "GED boost: restored to defaults"
     fi
 }
 
 # ── Enable Cool Mode ──────────────────────────────────────────
 enable_cool() {
-    log_msg "Enabling Improved Cool Mode..."
+    log_msg "Enabling Cool Mode..."
     tune_gpu_power 1
-    tune_eem_gpu -10
+    tune_eem_gpu -8
     tune_schedutil 1
     tune_dram_opp 1
-    tune_smart_thermal 1
-    tune_cpuset 1
-    tune_io_vm 1
-    
-    # Keep existing efficiency nodes
-    de_write 1 /sys/kernel/ged/hal/dcs_mode
-    de_write 1 /sys/power/mcdi_enable
-    de_write 1 /sys/devices/system/cpu/cpuidle/cpuidle_sysfs_switch
-    
+    tune_gpu_dcs 1
+    tune_mcdi 1
+    tune_fpsgo_thermal 1
+    tune_ppm_thermal 1
+    tune_thermal_msg 1
+    tune_ged_boost 1
     mkdir -p "$CFG_DIR"
     echo "enabled" > "$COOL_STATE"
-    log_msg "Improved Cool Mode ENABLED ✓ (Less Heat + No Framedrop)"
+    log_msg "Cool Mode ENABLED ✓ (10 optimizations active)"
 }
 
 # ── Disable Cool Mode ─────────────────────────────────────────
 disable_cool() {
-    log_msg "Disabling Improved Cool Mode..."
+    log_msg "Disabling Cool Mode..."
     tune_gpu_power 0
     tune_eem_gpu 0
     tune_schedutil 0
     tune_dram_opp 0
-    tune_smart_thermal 0
-    tune_cpuset 0
-    tune_io_vm 0
-    
+    tune_gpu_dcs 0
+    tune_mcdi 0
+    tune_fpsgo_thermal 0
+    tune_ppm_thermal 0
+    tune_thermal_msg 0
+    tune_ged_boost 0
     mkdir -p "$CFG_DIR"
     echo "disabled" > "$COOL_STATE"
-    log_msg "Improved Cool Mode DISABLED ✓"
+    log_msg "Cool Mode DISABLED ✓"
 }
 
 case "$ACTION" in
